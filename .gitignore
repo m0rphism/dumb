@@ -1,0 +1,18 @@
+# Rust
+target/
+
+# Vim
+*.swp
+*.swo
+
+# Latex
+auto/
+*.aux
+*.log
+*.out
+*.synctex.gz
+*.fls
+*.fdb_latexmk
+
+# Misc
+.#*
