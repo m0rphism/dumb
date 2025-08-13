@@ -14,7 +14,8 @@ use crossterm::{
 
 use crate::{
     file_tree::{self, FileNode, FileState, FileTree},
-    State,
+    scan::Inode,
+    SortBy, State,
 };
 
 pub fn rgb(r: f32, g: f32, b: f32) -> Color {
@@ -28,17 +29,41 @@ pub fn rgb(r: f32, g: f32, b: f32) -> Color {
 pub fn sorted_entries<'a>(
     file_tree: &'a FileTree,
     state: &State,
-) -> Vec<(&'a OsString, &'a FileNode, bool)> {
+) -> Vec<(&'a OsString, &'a FileNode, Inode, bool)> {
     let children = &file_tree.get(&state.cur_subdir).unwrap().children;
     let mut children = children
         .into_iter()
         .map(|(name, node)| {
             let path = state.target_path.join(&state.cur_subdir).join(name);
             let is_dir = path.is_dir() && !path.is_symlink();
-            (name, node, is_dir)
+            let inode = file_tree.inodes.get(&node.inode_id).unwrap().clone();
+            (name, node, inode, is_dir)
         })
         .collect::<Vec<_>>();
-    children.sort_by_key(|(name, _node, is_dir)| (!*is_dir, *name));
+    match state.sort_by {
+        SortBy::Name => {
+            children.sort_by_key(|(name, _node, _inode, is_dir)| {
+                let is_file = !*is_dir && state.sort_dirs_before_files;
+                (is_file, *name)
+            });
+        }
+        SortBy::Size => {
+            children.sort_by_key(|(_name, _node, inode, is_dir)| {
+                // let is_file = !*is_dir && state.sort_dirs_before_files;
+                // (is_file, inode.size_in_bytes)
+                inode.size_in_bytes
+            });
+            children.reverse();
+        }
+        SortBy::ModTime => {
+            children.sort_by_key(|(_name, _node, inode, is_dir)| {
+                // let is_file = !*is_dir && state.sort_dirs_before_files;
+                // (is_file, inode.last_modified)
+                inode.last_modified
+            });
+            children.reverse();
+        }
+    }
     children
 }
 
@@ -98,6 +123,15 @@ pub fn render_state(stdout: &mut Stdout, state: &mut State) -> Result<()> {
                 style::ResetColor,
             )?;
         }
+
+        write!(
+            w,
+            ", Sort by {}{:?}{}",
+            style::SetForegroundColor(rgb(0.4, 0.5, 1.0)),
+            state.sort_by,
+            style::ResetColor,
+        )?;
+
         match target_dir_state {
             FileState::Queued | FileState::InProgress => {
                 write!(w, ", Scanning {}", loading_text(state.frame))?;
@@ -130,7 +164,9 @@ pub fn render_state(stdout: &mut Stdout, state: &mut State) -> Result<()> {
             0,
             state.cur_subdir_entry_ix() as i64 - state.term_size[1] as i64 / 2,
         ) as usize;
-        for (j, (i, (name, node, _is_dir))) in children.iter().enumerate().skip(skip).enumerate() {
+        for (j, (i, (name, node, inode, _is_dir))) in
+            children.iter().enumerate().skip(skip).enumerate()
+        {
             write!(w, "{}", cursor::MoveTo(0, j as u16 + 3))?;
             if i == state.cur_subdir_entry_ix() {
                 write!(w, "{}", style::SetForegroundColor(rgb(0.4, 1.0, 0.5)))?;
@@ -140,7 +176,6 @@ pub fn render_state(stdout: &mut Stdout, state: &mut State) -> Result<()> {
             if i == state.cur_subdir_entry_ix() {
                 write!(w, "{}", style::ResetColor)?;
             }
-            let inode = file_tree.inodes.get(&node.inode_id).unwrap();
             write!(w, "{:>10}", bytes_to_str(inode.size_in_bytes))?;
             let size_percent = (inode.size_in_bytes as f64 / cur_dir_size as f64) * 100.0;
             write!(

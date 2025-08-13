@@ -27,6 +27,22 @@ pub enum Event {
     Redraw,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub enum SortBy {
+    Name,
+    Size,
+    ModTime,
+}
+impl SortBy {
+    fn next(self) -> Self {
+        match self {
+            SortBy::Size => SortBy::Name,
+            SortBy::Name => SortBy::ModTime,
+            SortBy::ModTime => SortBy::Size,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct State {
     pub target_path: PathBuf,
@@ -35,6 +51,8 @@ pub struct State {
     pub cur_subdir_entry_ixs: Vec<usize>,
     pub term_size: [u16; 2],
     pub frame: usize,
+    pub sort_by: SortBy,
+    pub sort_dirs_before_files: bool,
 }
 
 impl State {
@@ -111,6 +129,8 @@ fn main() -> Result<()> {
         target_path,
         term_size: [80, 40],
         frame: 0,
+        sort_by: SortBy::Size,
+        sort_dirs_before_files: true,
     };
 
     let mut stdout = stdout();
@@ -152,7 +172,9 @@ fn main() -> Result<()> {
                                     let ix = state.cur_subdir_entry_ix();
                                     let file_tree = state.file_tree.lock().unwrap();
                                     let entries = sorted_entries(&file_tree, &state);
-                                    if let Some((cur_name, _, _is_dir @ true)) = entries.get(ix) {
+                                    if let Some((cur_name, _node, _inode, _is_dir @ true)) =
+                                        entries.get(ix)
+                                    {
                                         state.cur_subdir = state.cur_subdir.join(cur_name);
                                         true
                                     } else {
@@ -163,6 +185,14 @@ fn main() -> Result<()> {
                                     state.cur_subdir_entry_ixs.push(0);
                                     render_state(&mut stdout, &mut state)?;
                                 }
+                            }
+                            KeyCode::Char('s') => {
+                                state.sort_by = state.sort_by.next();
+                                render_state(&mut stdout, &mut state)?;
+                            }
+                            KeyCode::Char('S') => {
+                                state.sort_dirs_before_files = !state.sort_dirs_before_files;
+                                render_state(&mut stdout, &mut state)?;
                             }
                             _ => (),
                         }
