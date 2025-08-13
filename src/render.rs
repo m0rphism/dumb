@@ -164,14 +164,17 @@ pub fn render_state(stdout: &mut Stdout, state: &mut State) -> Result<()> {
             0,
             state.cur_subdir_entry_ix() as i64 - state.term_size[1] as i64 / 2,
         ) as usize;
-        for (j, (i, (name, node, inode, _is_dir))) in
+        for (j, (i, (name, node, inode, is_dir))) in
             children.iter().enumerate().skip(skip).enumerate()
         {
             write!(w, "{}", cursor::MoveTo(0, j as u16 + 3))?;
             if i == state.cur_subdir_entry_ix() {
                 write!(w, "{}", style::SetForegroundColor(rgb(0.4, 1.0, 0.5)))?;
             }
-            let name = name.to_string_lossy().chars().take(13).collect::<String>();
+            let mut name = name.to_string_lossy().chars().take(13).collect::<String>();
+            if *is_dir {
+                name += "/";
+            }
             write!(w, "{:<15}", name)?;
             if i == state.cur_subdir_entry_ix() {
                 write!(w, "{}", style::ResetColor)?;
