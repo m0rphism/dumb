@@ -64,7 +64,13 @@ impl State {
     }
 }
 
-fn main() -> Result<()> {
+fn main() {
+    if let Err(e) = run() {
+        println!("{e}");
+        std::fs::write("dumb.log", e.to_string()).unwrap();
+    }
+}
+fn run() -> Result<()> {
     let args = Args::parse();
 
     let target_path = args
