@@ -3,7 +3,10 @@ use std::io::{stdout, Write};
 use anyhow::Result;
 use crossterm::{
     cursor,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{
+        disable_raw_mode, enable_raw_mode, DisableLineWrap, EnableLineWrap, EnterAlternateScreen,
+        LeaveAlternateScreen,
+    },
     QueueableCommand,
 };
 
@@ -15,6 +18,7 @@ impl RawMode {
         enable_raw_mode()?;
         stdout.queue(cursor::Hide)?;
         stdout.queue(EnterAlternateScreen)?;
+        stdout.queue(DisableLineWrap)?;
         Ok(Self {})
     }
 }
@@ -24,6 +28,7 @@ impl Drop for RawMode {
         let mut stdout = stdout();
         stdout.queue(cursor::Show).unwrap();
         stdout.queue(LeaveAlternateScreen).unwrap();
+        stdout.queue(EnableLineWrap).unwrap();
         disable_raw_mode().unwrap();
         stdout.flush().unwrap();
     }
