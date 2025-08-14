@@ -132,11 +132,12 @@ pub fn render_state(stdout: &mut Stdout, state: &mut State) -> Result<()> {
             style::ResetColor,
         )?;
 
-        match target_dir_state {
+        let is_scan_done = match target_dir_state {
             FileState::Queued | FileState::InProgress => {
                 write!(w, ", Scanning {}", loading_text(state.frame))?;
+                false
             }
-            FileState::Finished => (),
+            FileState::Finished => true,
             FileState::Failed(err) => {
                 write!(
                     w,
@@ -145,61 +146,116 @@ pub fn render_state(stdout: &mut Stdout, state: &mut State) -> Result<()> {
                     err,
                     style::ResetColor,
                 )?;
+                true
             }
         };
 
         write!(w, "{}", cursor::MoveTo(0, 2))?;
         write!(w, "{}", style::SetAttribute(Attribute::Bold))?;
-        write!(w, "{:<15}", "Name")?;
-        write!(w, "{:<10}", "Size")?;
-        write!(w, "{:<10}", "Size Rel")?;
-        write!(w, "{:<10}", "Size Abs")?;
-        write!(w, "{:<20}", "Modification")?;
-        write!(w, "{:<6}", "Type")?;
-        write!(w, "{:<10}", "State")?;
+        if !is_scan_done {
+            write!(w, "{:<1}  ", "S")?;
+        }
+        let name_col_width = i64::max(
+            8,
+            i64::min(
+                32,
+                state.term_size[0] as i64 - 46 - if is_scan_done { 0 } else { 3 },
+            ),
+        );
+        write!(w, "{}  ", "Name")?;
+        for _ in 0..name_col_width - 4 {
+            write!(w, " ")?;
+        }
+        write!(w, "{:<10}  ", "Size Abs")?;
+        write!(w, "{:<10}  ", "Size Rel")?;
+        if !state.cur_subdir.to_string_lossy().is_empty() {
+            write!(w, "{:<10}  ", "Size Cur")?;
+        }
+        write!(w, "{:<20}", "Last Modified")?;
         write!(w, "{}", style::ResetColor)?;
 
         let children = sorted_entries(&file_tree, &state);
         let skip = i64::max(
             0,
-            state.cur_subdir_entry_ix() as i64 - state.term_size[1] as i64 / 2,
+            state.cur_subdir_entry_ix() as i64 - ((state.term_size[1] as i64 - 3) / 2),
         ) as usize;
         for (j, (i, (name, node, inode, is_dir))) in
             children.iter().enumerate().skip(skip).enumerate()
         {
             write!(w, "{}", cursor::MoveTo(0, j as u16 + 3))?;
-            if i == state.cur_subdir_entry_ix() {
+            let is_selected = i == state.cur_subdir_entry_ix();
+            let mut x = 0;
+
+            if is_selected {
                 // write!(w, "{}", style::SetForegroundColor(rgb(0.4, 1.0, 0.5)))?;
                 write!(w, "{}", style::SetBackgroundColor(rgb(0.1, 0.1, 0.1)))?;
             }
-            let mut name = name.to_string_lossy().chars().take(13).collect::<String>();
+
+            if !is_scan_done {
+                let state_str = match node.state {
+                    FileState::Queued | FileState::InProgress => "…",
+                    FileState::Finished => " ",
+                    FileState::Failed(_) => "E",
+                };
+                write!(w, "{:<1}  ", state_str)?;
+                x += 3;
+            }
+
+            let mut name = name
+                .to_string_lossy()
+                .chars()
+                .take(name_col_width as usize)
+                .collect::<String>();
             if *is_dir {
                 name += "/";
             }
-            write!(w, "{:<15}", name)?;
-            write!(w, "{:>10}", bytes_to_str(inode.size_in_bytes))?;
-            let size_percent = (inode.size_in_bytes as f64 / cur_dir_size as f64) * 100.0;
-            write!(
-                w,
-                "{}",
-                style::SetForegroundColor(percent_to_color(size_percent))
-            )?;
-            write!(w, "{:<10}", format!("{:6.2} %", size_percent))?;
+            if inode.is_dir {
+                write!(w, "{}", style::SetForegroundColor(rgb(0.7, 0.7, 0.7)))?;
+            }
+            write!(w, "{name}  ")?;
+            x += name_col_width;
+
+            // Make sure background color is printed even if name is shorter than max length.
+            if is_selected {
+                for _ in name.chars().count()..name_col_width as usize {
+                    write!(w, " ")?;
+                }
+            }
+            write!(w, "{}  ", cursor::MoveTo(x as u16, j as u16 + 3))?;
+
             write!(w, "{}", style::SetForegroundColor(style::Color::White))?;
+            write!(w, "{:>10}  ", bytes_to_str(inode.size_in_bytes))?;
+
             let abs_size_percent = (inode.size_in_bytes as f64 / target_dir_size as f64) * 100.0;
             write!(
                 w,
                 "{}",
                 style::SetForegroundColor(percent_to_color(abs_size_percent))
             )?;
-            write!(w, "{:<10}", format!("{:6.2} %", abs_size_percent))?;
+            write!(w, "{:<10}  ", format!("{:6.2} %", abs_size_percent))?;
             write!(w, "{}", style::SetForegroundColor(style::Color::White))?;
+
+            if !state.cur_subdir.to_string_lossy().is_empty() {
+                let size_percent = (inode.size_in_bytes as f64 / cur_dir_size as f64) * 100.0;
+                write!(
+                    w,
+                    "{}",
+                    style::SetForegroundColor(percent_to_color(size_percent))
+                )?;
+                write!(w, "{:<10}  ", format!("{:6.2} %", size_percent))?;
+                write!(w, "{}", style::SetForegroundColor(style::Color::White))?;
+            }
+
             let last_modified = DateTime::<Local>::from(inode.last_modified);
-            let last_modified = last_modified.format("%Y-%m-%d %H:%M:%S");
+            let gray = format!("{}", style::SetForegroundColor(rgb(0.5, 0.5, 0.5)));
+            // let gray = format!("{}", style::SetForegroundColor(style::Color::White));
+            let white = format!("{}", style::SetForegroundColor(style::Color::White));
+            let last_modified = last_modified
+                .format("%Y[-]%m[-]%d  %H[:]%M[:]%S")
+                .to_string()
+                .replace("[", &gray)
+                .replace("]", &white);
             write!(w, "{:<20}", last_modified)?;
-            let is_dir = if inode.is_dir { "D" } else { "F" };
-            write!(w, "{:<6}", is_dir)?;
-            write!(w, "{:<10?}", node.state)?;
             write!(w, "{}", style::ResetColor)?;
         }
     }

@@ -14,6 +14,7 @@ use std::time::Duration;
 use anyhow::Result;
 use clap::Parser;
 use crossterm::event::{Event as TermEvent, KeyCode, KeyEventKind};
+use crossterm::terminal;
 
 use crate::args::Args;
 use crate::file_tree::FileTree;
@@ -123,6 +124,11 @@ fn run() -> Result<()> {
         }
     });
 
+    let term_size = {
+        let (w, h) = terminal::size()?;
+        [w, h]
+    };
+
     // cur_subdir_entries: target_path
     //     .read_dir()?
     //     .filter_map(|e| e.ok().map(|e| e.file_name()))
@@ -133,7 +139,7 @@ fn run() -> Result<()> {
         cur_subdir: PathBuf::new(),
         cur_subdir_entry_ixs: vec![0],
         target_path,
-        term_size: [80, 40],
+        term_size,
         frame: 0,
         sort_by: SortBy::Size,
         sort_dirs_before_files: true,
