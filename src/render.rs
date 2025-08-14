@@ -169,16 +169,14 @@ pub fn render_state(stdout: &mut Stdout, state: &mut State) -> Result<()> {
         {
             write!(w, "{}", cursor::MoveTo(0, j as u16 + 3))?;
             if i == state.cur_subdir_entry_ix() {
-                write!(w, "{}", style::SetForegroundColor(rgb(0.4, 1.0, 0.5)))?;
+                // write!(w, "{}", style::SetForegroundColor(rgb(0.4, 1.0, 0.5)))?;
+                write!(w, "{}", style::SetBackgroundColor(rgb(0.1, 0.1, 0.1)))?;
             }
             let mut name = name.to_string_lossy().chars().take(13).collect::<String>();
             if *is_dir {
                 name += "/";
             }
             write!(w, "{:<15}", name)?;
-            if i == state.cur_subdir_entry_ix() {
-                write!(w, "{}", style::ResetColor)?;
-            }
             write!(w, "{:>10}", bytes_to_str(inode.size_in_bytes))?;
             let size_percent = (inode.size_in_bytes as f64 / cur_dir_size as f64) * 100.0;
             write!(
@@ -187,7 +185,7 @@ pub fn render_state(stdout: &mut Stdout, state: &mut State) -> Result<()> {
                 style::SetForegroundColor(percent_to_color(size_percent))
             )?;
             write!(w, "{:<10}", format!("{:6.2} %", size_percent))?;
-            write!(w, "{}", style::ResetColor)?;
+            write!(w, "{}", style::SetForegroundColor(style::Color::White))?;
             let abs_size_percent = (inode.size_in_bytes as f64 / target_dir_size as f64) * 100.0;
             write!(
                 w,
@@ -195,13 +193,14 @@ pub fn render_state(stdout: &mut Stdout, state: &mut State) -> Result<()> {
                 style::SetForegroundColor(percent_to_color(abs_size_percent))
             )?;
             write!(w, "{:<10}", format!("{:6.2} %", abs_size_percent))?;
-            write!(w, "{}", style::ResetColor)?;
+            write!(w, "{}", style::SetForegroundColor(style::Color::White))?;
             let last_modified = DateTime::<Local>::from(inode.last_modified);
             let last_modified = last_modified.format("%Y-%m-%d %H:%M:%S");
             write!(w, "{:<20}", last_modified)?;
             let is_dir = if inode.is_dir { "D" } else { "F" };
             write!(w, "{:<6}", is_dir)?;
             write!(w, "{:<10?}", node.state)?;
+            write!(w, "{}", style::ResetColor)?;
         }
     }
 
