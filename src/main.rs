@@ -159,19 +159,19 @@ fn run() -> Result<()> {
                     if key_event.kind != KeyEventKind::Release {
                         match key_event.code {
                             KeyCode::Char('q') => break,
-                            KeyCode::Char('j') => {
+                            KeyCode::Char('j') | KeyCode::Down => {
                                 let ix = state.cur_subdir_entry_ix_mut();
                                 *ix += 1;
                                 render_state(&mut stdout, &mut state)?;
                             }
-                            KeyCode::Char('k') => {
+                            KeyCode::Char('k') | KeyCode::Up => {
                                 let ix = state.cur_subdir_entry_ix_mut();
                                 if *ix > 0 {
                                     *ix -= 1;
                                     render_state(&mut stdout, &mut state)?;
                                 }
                             }
-                            KeyCode::Char('h') => {
+                            KeyCode::Char('h') | KeyCode::Left => {
                                 if let Some(p) = state.cur_subdir.parent() {
                                     state.cur_subdir = p.to_path_buf();
                                     state.cur_subdir_entry_ixs.pop();
@@ -181,7 +181,7 @@ fn run() -> Result<()> {
                                     render_state(&mut stdout, &mut state)?;
                                 }
                             }
-                            KeyCode::Char('l') => {
+                            KeyCode::Char('l') | KeyCode::Right => {
                                 let redraw = {
                                     let ix = state.cur_subdir_entry_ix();
                                     let file_tree = state.file_tree.lock().unwrap();
