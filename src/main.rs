@@ -4,6 +4,7 @@ pub mod raw_mode;
 pub mod render;
 pub mod scan;
 
+use core::num;
 use std::{
     io::stdout,
     path::PathBuf,
@@ -206,6 +207,28 @@ fn run() -> Result<()> {
                                 };
                                 if redraw {
                                     state.cur_subdir_entry_ixs.push(0);
+                                    render_state(&mut stdout, &mut state)?;
+                                }
+                            }
+                            KeyCode::Char('g') | KeyCode::Home => {
+                                let ix = state.cur_subdir_entry_ix_mut();
+                                if *ix > 0 {
+                                    *ix = 0;
+                                    render_state(&mut stdout, &mut state)?;
+                                }
+                            }
+                            KeyCode::Char('G') | KeyCode::End => {
+                                let num_files_in_cur_subdir = state
+                                    .file_tree
+                                    .lock()
+                                    .unwrap()
+                                    .get(&state.cur_subdir)
+                                    .map(|node| node.children.len())
+                                    .unwrap_or(0);
+                                let ix = state.cur_subdir_entry_ix_mut();
+
+                                if *ix + 1 < num_files_in_cur_subdir {
+                                    *ix = num_files_in_cur_subdir.saturating_sub(1);
                                     render_state(&mut stdout, &mut state)?;
                                 }
                             }
