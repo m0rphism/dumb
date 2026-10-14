@@ -4,22 +4,25 @@ pub mod raw_mode;
 pub mod render;
 pub mod scan;
 
-use std::io::stdout;
-use std::path::PathBuf;
-use std::sync::mpsc::channel;
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::{
+    io::stdout,
+    path::PathBuf,
+    sync::{Arc, Mutex, mpsc::channel},
+    time::Duration,
+};
 
 use anyhow::Result;
 use clap::Parser;
 use crossterm::event::{Event as TermEvent, KeyCode, KeyEventKind};
 use crossterm::terminal;
 
-use crate::args::Args;
-use crate::file_tree::FileTree;
-use crate::raw_mode::RawMode;
-use crate::render::{render_state, sorted_entries};
-use crate::scan::scan;
+use crate::{
+    args::Args,
+    file_tree::FileTree,
+    raw_mode::RawMode,
+    render::{render_state, sorted_entries},
+    scan::scan,
+};
 
 #[derive(Clone, Debug)]
 pub enum Event {
