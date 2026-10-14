@@ -20,7 +20,7 @@ use crossterm::terminal;
 
 use crate::{
     args::Args,
-    config::Config,
+    config::{Config, SortBy},
     file_tree::FileTree,
     raw_mode::RawMode,
     render::{render_state, sorted_entries},
@@ -32,22 +32,6 @@ use crate::{
 pub enum Event {
     Term(TermEvent),
     Redraw,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub enum SortBy {
-    Name,
-    Size,
-    ModTime,
-}
-impl SortBy {
-    fn next(self) -> Self {
-        match self {
-            SortBy::Size => SortBy::Name,
-            SortBy::Name => SortBy::ModTime,
-            SortBy::ModTime => SortBy::Size,
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -180,7 +164,7 @@ fn run() -> Result<()> {
         target_path,
         term_size,
         frame: 0,
-        sort_by: SortBy::Size,
+        sort_by: config.default_sort_mode,
         sort_dirs_before_files: true,
     };
 
