@@ -9,6 +9,3 @@ pub struct Args {
     #[arg(value_name = "PATH")]
     pub target: Option<PathBuf>,
 }
-
-// #[arg(short, long, value_name = "PATH")]
-// #[arg(trailing_var_arg = true)]
