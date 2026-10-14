@@ -1,8 +1,10 @@
 pub mod args;
+pub mod config;
 pub mod file_tree;
 pub mod raw_mode;
 pub mod render;
 pub mod scan;
+pub mod theme;
 
 use std::{
     io::stdout,
@@ -11,17 +13,19 @@ use std::{
     time::Duration,
 };
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
 use crossterm::event::{Event as TermEvent, KeyCode, KeyEventKind};
 use crossterm::terminal;
 
 use crate::{
     args::Args,
+    config::Config,
     file_tree::FileTree,
     raw_mode::RawMode,
     render::{render_state, sorted_entries},
     scan::scan,
+    theme::Theme,
 };
 
 #[derive(Clone, Debug)]
@@ -75,6 +79,39 @@ fn main() {
 }
 fn run() -> Result<()> {
     let args = Args::parse();
+
+    let config_dir = dirs::config_dir().expect(
+        "The config directory could not be determined. Is your $HOME variable empty for some reason?"
+    ).join("dumb");
+
+    let config = {
+        let config_path = config_dir.join("config.toml");
+        if !config_dir.exists() {
+            Config::default()
+        } else {
+            let content = std::fs::read_to_string(&config_path)
+                .context(format!("Couldn't read config file at {config_path:?}."))?;
+            toml::from_str(&content)
+                .context(format!("Failed to parse config file at {config_path:?}."))?
+        }
+    };
+
+    let theme = {
+        match config.theme {
+            None => Theme::default(),
+            Some(theme_path) => {
+                let theme_path = if theme_path.is_relative() {
+                    config_dir.join(theme_path)
+                } else {
+                    theme_path.clone()
+                };
+                let content = std::fs::read_to_string(&theme_path)
+                    .context(format!("Couldn't read theme file at {theme_path:?}."))?;
+                toml::from_str(&content)
+                    .context(format!("Failed to parse config file at {theme_path:?}."))?
+            }
+        }
+    };
 
     let target_path = args
         .target
@@ -149,7 +186,7 @@ fn run() -> Result<()> {
 
     let mut stdout = stdout();
     let _raw_mode = RawMode::enter()?;
-    render_state(&mut stdout, &mut state)?;
+    render_state(&mut stdout, &mut state, &theme)?;
 
     for event in receiver {
         // println!("Received: {event:?}");
@@ -170,14 +207,14 @@ fn run() -> Result<()> {
                                 let ix = state.cur_subdir_entry_ix_mut();
                                 if *ix + 1 < num_files_in_cur_subdir {
                                     *ix += 1;
-                                    render_state(&mut stdout, &mut state)?;
+                                    render_state(&mut stdout, &mut state, &theme)?;
                                 }
                             }
                             KeyCode::Char('k') | KeyCode::Up => {
                                 let ix = state.cur_subdir_entry_ix_mut();
                                 if *ix > 0 {
                                     *ix -= 1;
-                                    render_state(&mut stdout, &mut state)?;
+                                    render_state(&mut stdout, &mut state, &theme)?;
                                 }
                             }
                             KeyCode::Char('h') | KeyCode::Left => {
@@ -187,7 +224,7 @@ fn run() -> Result<()> {
                                     if state.cur_subdir_entry_ixs.is_empty() {
                                         state.cur_subdir_entry_ixs.push(0)
                                     }
-                                    render_state(&mut stdout, &mut state)?;
+                                    render_state(&mut stdout, &mut state, &theme)?;
                                 }
                             }
                             KeyCode::Char('l') | KeyCode::Right => {
@@ -206,14 +243,14 @@ fn run() -> Result<()> {
                                 };
                                 if redraw {
                                     state.cur_subdir_entry_ixs.push(0);
-                                    render_state(&mut stdout, &mut state)?;
+                                    render_state(&mut stdout, &mut state, &theme)?;
                                 }
                             }
                             KeyCode::Char('g') | KeyCode::Home => {
                                 let ix = state.cur_subdir_entry_ix_mut();
                                 if *ix > 0 {
                                     *ix = 0;
-                                    render_state(&mut stdout, &mut state)?;
+                                    render_state(&mut stdout, &mut state, &theme)?;
                                 }
                             }
                             KeyCode::Char('G') | KeyCode::End => {
@@ -228,16 +265,16 @@ fn run() -> Result<()> {
 
                                 if *ix + 1 < num_files_in_cur_subdir {
                                     *ix = num_files_in_cur_subdir.saturating_sub(1);
-                                    render_state(&mut stdout, &mut state)?;
+                                    render_state(&mut stdout, &mut state, &theme)?;
                                 }
                             }
                             KeyCode::Char('s') => {
                                 state.sort_by = state.sort_by.next();
-                                render_state(&mut stdout, &mut state)?;
+                                render_state(&mut stdout, &mut state, &theme)?;
                             }
                             KeyCode::Char('S') => {
                                 state.sort_dirs_before_files = !state.sort_dirs_before_files;
-                                render_state(&mut stdout, &mut state)?;
+                                render_state(&mut stdout, &mut state, &theme)?;
                             }
                             _ => (),
                         }
@@ -245,12 +282,12 @@ fn run() -> Result<()> {
                 }
                 TermEvent::Resize(w, h) => {
                     state.term_size = [w, h];
-                    render_state(&mut stdout, &mut state)?;
+                    render_state(&mut stdout, &mut state, &theme)?;
                 }
                 _ => (),
             },
             Event::Redraw => {
-                render_state(&mut stdout, &mut state)?;
+                render_state(&mut stdout, &mut state, &theme)?;
             }
         };
     }

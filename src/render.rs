@@ -8,14 +8,15 @@ use anyhow::Result;
 use chrono::{DateTime, Local};
 use crossterm::{
     cursor,
-    style::{self, Attribute, Color},
+    style::{self, Color, ResetColor},
     terminal::{Clear, ClearType},
 };
 
 use crate::{
+    SortBy, State,
     file_tree::{FileNode, FileState, FileTree},
     scan::Inode,
-    SortBy, State,
+    theme::{Style, Theme, color_to_crossterm, interpolate_color},
 };
 
 pub fn rgb(r: f32, g: f32, b: f32) -> Color {
@@ -67,7 +68,7 @@ pub fn sorted_entries<'a>(
     children
 }
 
-pub fn render_state(stdout: &mut Stdout, state: &mut State) -> Result<()> {
+pub fn render_state(stdout: &mut Stdout, state: &mut State, theme: &Theme) -> Result<()> {
     // We buffer all rendering before sending it to stdout to remove terminal flickering.
     // Flickering shouldn't be an issue if stdout is only flushed at the end, but for some reason
     // it is...
@@ -88,57 +89,60 @@ pub fn render_state(stdout: &mut Stdout, state: &mut State) -> Result<()> {
         let target_dir_state = &file_tree.get(&PathBuf::from("")).as_ref().unwrap().state;
 
         write!(w, "{}", cursor::MoveTo(0, 0))?;
-        write!(
-            w,
-            "Current Directory: {}{}{}{}/{}{}, ",
-            style::SetForegroundColor(rgb(0.4, 0.5, 1.0)),
-            state.target_path.to_string_lossy(),
-            style::ResetColor,
-            style::SetForegroundColor(rgb(1.0, 0.4, 0.5)),
-            state.cur_subdir.to_string_lossy(),
-            style::ResetColor,
-        )?;
+        let style = &theme.header;
+
+        // Current Directory
+        let prefix_str = state.target_path.to_string_lossy();
+        let suffix_str = state.cur_subdir.to_string_lossy();
+        style.label.write_text(&mut w, "Current Directory: ")?;
+        style.path_prefix.write_text(&mut w, prefix_str.as_ref())?;
+        style.label.write_text(&mut w, "/")?;
+        style.path_suffix.write_text(&mut w, suffix_str.as_ref())?;
+        style.label.write_text(&mut w, ", ")?;
+
+        // Size
         if state.cur_subdir.to_string_lossy().is_empty() {
-            write!(
-                w,
-                "Size: {}{}{}",
-                style::SetForegroundColor(rgb(0.4, 0.5, 1.0)),
-                bytes_to_str(target_dir_size),
-                style::ResetColor,
-            )?;
+            let target_size_str = bytes_to_str(target_dir_size);
+            style.label.write_text(&mut w, "Size: ")?;
+            style.size_total.write_text(&mut w, &target_size_str)?;
         } else {
             let size_percent = (cur_dir_size as f64 / target_dir_size as f64) * 100.0;
-            write!(
-                w,
-                "Size: {}{}{} / {}{}{} ({}{:.2} %{})",
-                style::SetForegroundColor(rgb(1.0, 0.4, 0.5)),
-                bytes_to_str(cur_dir_size),
-                style::ResetColor,
-                style::SetForegroundColor(rgb(0.4, 0.5, 1.0)),
-                bytes_to_str(target_dir_size),
-                style::ResetColor,
-                // style::SetForegroundColor(rgb(0.4, 1.0, 0.5)),
-                style::SetForegroundColor(percent_to_color(size_percent)),
-                size_percent,
-                style::ResetColor,
-            )?;
+            let target_size_str = bytes_to_str(target_dir_size);
+            let cur_dir_size_str = bytes_to_str(cur_dir_size);
+            style.label.write_text(&mut w, "Size: ")?;
+            style.size_current.write_text(&mut w, &cur_dir_size_str)?;
+            style.label.write_text(&mut w, " / ")?;
+            style.size_total.write_text(&mut w, &target_size_str)?;
+            style.label.write_text(&mut w, " (")?;
+            if let Some(s) = &style.size_percent {
+                s.write_text(&mut w, &format!("{size_percent:.2}"))?;
+            } else {
+                let s = style::SetForegroundColor(color_to_crossterm(&percent_to_color(
+                    size_percent,
+                    &theme,
+                )));
+                write!(w, "{s}{size_percent:.2}{}", ResetColor)?;
+            }
+            style.label.write_text(&mut w, ")")?;
         }
+        style.label.write_text(&mut w, ", ")?;
 
-        write!(
-            w,
-            ", Sort by {}{:?}{}",
-            style::SetForegroundColor(rgb(0.4, 0.5, 1.0)),
-            state.sort_by,
-            style::ResetColor,
-        )?;
+        // Sort Mode
+        style.label.write_text(&mut w, "Sort by ")?;
+        style
+            .sort_mode
+            .write_text(&mut w, &format!("{:?}", state.sort_by))?;
 
+        // Progress State
         let is_scan_done = match target_dir_state {
             FileState::Queued | FileState::InProgress => {
+                style.label.write(&mut w)?;
                 write!(w, ", Scanning {}", loading_text(state.frame))?;
                 false
             }
             FileState::Finished => true,
             FileState::Failed(err) => {
+                style.label.write(&mut w)?;
                 write!(
                     w,
                     ", {}ERROR: {}{}",
@@ -150,10 +154,12 @@ pub fn render_state(stdout: &mut Stdout, state: &mut State) -> Result<()> {
             }
         };
 
+        // File View Header
         write!(w, "{}", cursor::MoveTo(0, 2))?;
-        write!(w, "{}", style::SetAttribute(Attribute::Bold))?;
+        let style = &theme.file_table;
         if !is_scan_done {
-            write!(w, "{:<1}  ", "S")?;
+            style.progress_header.write_text(&mut w, "S")?;
+            write!(w, "  ")?;
         }
         let name_col_width = i64::max(
             8,
@@ -162,18 +168,28 @@ pub fn render_state(stdout: &mut Stdout, state: &mut State) -> Result<()> {
                 state.term_size[0] as i64 - 46 - if is_scan_done { 0 } else { 3 },
             ),
         );
-        write!(w, "Name  ")?;
+        style.name_header.write_text(&mut w, "Name")?;
+        write!(w, "  ")?;
         for _ in 0..name_col_width - 4 {
             write!(w, " ")?;
         }
-        write!(w, "{:<10}  ", "Size Abs")?;
-        write!(w, "{:<10}  ", "Size Rel")?;
-        if !state.cur_subdir.to_string_lossy().is_empty() {
-            write!(w, "{:<10}  ", "Size Cur")?;
-        }
-        write!(w, "{:<20}", "Last Modified")?;
-        write!(w, "{}", style::ResetColor)?;
 
+        write!(w, "  ")?;
+        style.size_abs_header.write_text(&mut w, "Size Abs")?;
+        write!(w, "  ")?;
+
+        write!(w, "  ")?;
+        style.size_rel_header.write_text(&mut w, "Size Rel")?;
+        write!(w, "  ")?;
+
+        if !state.cur_subdir.to_string_lossy().is_empty() {
+            write!(w, "  ")?;
+            style.size_cur_header.write_text(&mut w, "Size Cur")?;
+            write!(w, "  ")?;
+        }
+        style.modtime_header.write_text(&mut w, "Last Modified")?;
+
+        // File View Rows
         let children = sorted_entries(&file_tree, state);
         let skip = i64::max(
             0,
@@ -186,21 +202,29 @@ pub fn render_state(stdout: &mut Stdout, state: &mut State) -> Result<()> {
             let is_selected = i == state.cur_subdir_entry_ix();
             let mut x = 0;
 
-            if is_selected {
-                // write!(w, "{}", style::SetForegroundColor(rgb(0.4, 1.0, 0.5)))?;
-                write!(w, "{}", style::SetBackgroundColor(rgb(0.1, 0.1, 0.1)))?;
-            }
+            let maybe_selected = |s: &Style| {
+                if is_selected {
+                    s.merge(&style.selected_row)
+                } else {
+                    s.clone()
+                }
+            };
 
+            let bg_style = maybe_selected(&Style::default());
+
+            // State
             if !is_scan_done {
                 let state_str = match node.state {
                     FileState::Queued | FileState::InProgress => "…",
                     FileState::Finished => " ",
                     FileState::Failed(_) => "E",
                 };
-                write!(w, "{:<1}  ", state_str)?;
+                maybe_selected(&style.progress_value).write_text(&mut w, state_str)?;
+                bg_style.write_text(&mut w, "  ")?;
                 x += 3;
             }
 
+            // File Name
             let mut name = name
                 .to_string_lossy()
                 .chars()
@@ -209,53 +233,87 @@ pub fn render_state(stdout: &mut Stdout, state: &mut State) -> Result<()> {
             if *is_dir {
                 name += "/";
             }
-            if inode.is_dir {
-                write!(w, "{}", style::SetForegroundColor(rgb(0.7, 0.7, 0.7)))?;
-            }
-            write!(w, "{name}  ")?;
+            let s = if inode.is_dir {
+                &style.name_dir_value
+            } else {
+                &style.name_file_value
+            };
+            maybe_selected(&style.progress_value).write_text(&mut w, &name)?;
             x += name_col_width;
 
             // Make sure background color is printed even if name is shorter than max length.
             if is_selected {
-                for _ in name.chars().count()..name_col_width as usize {
-                    write!(w, " ")?;
-                }
-            }
-            write!(w, "{}  ", cursor::MoveTo(x as u16, j as u16 + 3))?;
+                let spaces: String = (name.chars().count()..name_col_width as usize)
+                    .map(|_| " ")
+                    .collect();
+                bg_style.write_text(&mut w, &spaces)?;
+            } else {
+                write!(w, "{}", cursor::MoveTo(x as u16, j as u16 + 3))?;
+            };
+            bg_style.write_text(&mut w, "  ")?;
 
-            write!(w, "{}", style::SetForegroundColor(style::Color::White))?;
-            write!(w, "{:>10}  ", bytes_to_str(inode.size_in_bytes))?;
+            // Size Abs
+            let size_abs_str = bytes_to_str(inode.size_in_bytes);
+            let spaces: String = (size_abs_str.len()..10).map(|_| " ").collect();
+            bg_style.write_text(&mut w, &spaces)?;
+            maybe_selected(&style.size_abs_value).write_text(&mut w, &size_abs_str)?;
+            bg_style.write_text(&mut w, "  ")?;
 
+            // Size Rel
             let abs_size_percent = (inode.size_in_bytes as f64 / target_dir_size as f64) * 100.0;
-            write!(
-                w,
-                "{}",
-                style::SetForegroundColor(percent_to_color(abs_size_percent))
-            )?;
-            write!(w, "{:<10}  ", format!("{:6.2} %", abs_size_percent))?;
-            write!(w, "{}", style::SetForegroundColor(style::Color::White))?;
+            let abs_size_percent_str = format!("{:6.2} %", abs_size_percent);
+            let spaces: String = (abs_size_percent_str.len()..10).map(|_| " ").collect();
+            bg_style.write_text(&mut w, &spaces)?;
+            if let Some(s) = &style.size_rel_value {
+                s.write(&mut w)?;
+            } else {
+                bg_style
+                    .clone()
+                    .fg(percent_to_color(abs_size_percent, theme))
+                    .write(&mut w)?;
+            }
+            write!(w, "{}", abs_size_percent_str)?;
+            write!(w, "{}", style::ResetColor)?;
+            bg_style.write_text(&mut w, "  ")?;
 
+            // Size Cur
             if !state.cur_subdir.to_string_lossy().is_empty() {
                 let size_percent = (inode.size_in_bytes as f64 / cur_dir_size as f64) * 100.0;
-                write!(
-                    w,
-                    "{}",
-                    style::SetForegroundColor(percent_to_color(size_percent))
-                )?;
-                write!(w, "{:<10}  ", format!("{:6.2} %", size_percent))?;
-                write!(w, "{}", style::SetForegroundColor(style::Color::White))?;
+                let size_percent_str = format!("{:6.2} %", size_percent);
+                let spaces: String = (abs_size_percent_str.len()..10).map(|_| " ").collect();
+                bg_style.write_text(&mut w, &spaces)?;
+                if let Some(s) = &style.size_cur_value {
+                    s.write(&mut w)?;
+                } else {
+                    bg_style
+                        .clone()
+                        .fg(percent_to_color(abs_size_percent, theme))
+                        .write(&mut w)?;
+                }
+                write!(w, "{}", size_percent_str)?;
+                write!(w, "{}", style::ResetColor)?;
+                bg_style.write_text(&mut w, "  ")?;
             }
 
+            // Last Modified
             let last_modified = DateTime::<Local>::from(inode.last_modified);
-            let gray = format!("{}", style::SetForegroundColor(rgb(0.5, 0.5, 0.5)));
-            // let gray = format!("{}", style::SetForegroundColor(style::Color::White));
-            let white = format!("{}", style::SetForegroundColor(style::Color::White));
+            let s_val = format!(
+                "{}{}",
+                ResetColor,
+                maybe_selected(&style.modtime_value).to_string()
+            );
+            let s_delim = format!(
+                "{}{}",
+                ResetColor,
+                maybe_selected(&style.modtime_delim).to_string()
+            );
             let last_modified = last_modified
                 .format("%Y[-]%m[-]%d  %H[:]%M[:]%S")
                 .to_string()
-                .replace("[", &gray)
-                .replace("]", &white);
-            write!(w, "{:<20}", last_modified)?;
+                .replace("[", &s_delim)
+                .replace("]", &s_val);
+            write!(w, "{}", s_val)?;
+            write!(w, "{}", last_modified)?;
             write!(w, "{}", style::ResetColor)?;
         }
     }
@@ -280,10 +338,10 @@ pub fn loading_text(i: usize) -> &'static str {
     }
 }
 
-pub fn percent_to_color(f: f64) -> Color {
+pub fn percent_to_color(f: f64, theme: &Theme) -> [f32; 3] {
     let f = (f / 100.0) as f32;
     let f = f.sqrt();
-    rgb(0.2 + f * 0.8, 0.2, 0.2)
+    interpolate_color(f, theme.size_min_color, theme.size_max_color)
 }
 
 pub fn bytes_to_str(mut n: u64) -> String {
