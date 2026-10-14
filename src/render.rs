@@ -1,7 +1,7 @@
 use std::{
     ffi::OsString,
     io::{Stdout, Write},
-    path::{Path, PathBuf},
+    path::PathBuf,
 };
 
 use anyhow::Result;
@@ -13,7 +13,7 @@ use crossterm::{
 };
 
 use crate::{
-    file_tree::{self, FileNode, FileState, FileTree},
+    file_tree::{FileNode, FileState, FileTree},
     scan::Inode,
     SortBy, State,
 };
@@ -32,11 +32,11 @@ pub fn sorted_entries<'a>(
 ) -> Vec<(&'a OsString, &'a FileNode, Inode, bool)> {
     let children = &file_tree.get(&state.cur_subdir).unwrap().children;
     let mut children = children
-        .into_iter()
+        .iter()
         .map(|(name, node)| {
             let path = state.target_path.join(&state.cur_subdir).join(name);
             let is_dir = path.is_dir() && !path.is_symlink();
-            let inode = file_tree.inodes.get(&node.inode_id).unwrap().clone();
+            let inode = *file_tree.inodes.get(&node.inode_id).unwrap();
             (name, node, inode, is_dir)
         })
         .collect::<Vec<_>>();
@@ -48,7 +48,7 @@ pub fn sorted_entries<'a>(
             });
         }
         SortBy::Size => {
-            children.sort_by_key(|(_name, _node, inode, is_dir)| {
+            children.sort_by_key(|(_name, _node, inode, _is_dir)| {
                 // let is_file = !*is_dir && state.sort_dirs_before_files;
                 // (is_file, inode.size_in_bytes)
                 inode.size_in_bytes
@@ -56,7 +56,7 @@ pub fn sorted_entries<'a>(
             children.reverse();
         }
         SortBy::ModTime => {
-            children.sort_by_key(|(_name, _node, inode, is_dir)| {
+            children.sort_by_key(|(_name, _node, inode, _is_dir)| {
                 // let is_file = !*is_dir && state.sort_dirs_before_files;
                 // (is_file, inode.last_modified)
                 inode.last_modified
@@ -110,7 +110,7 @@ pub fn render_state(stdout: &mut Stdout, state: &mut State) -> Result<()> {
             let size_percent = (cur_dir_size as f64 / target_dir_size as f64) * 100.0;
             write!(
                 w,
-                "Size: {}{}{} / {}{}{} ({}{}{})",
+                "Size: {}{}{} / {}{}{} ({}{:.2} %{})",
                 style::SetForegroundColor(rgb(1.0, 0.4, 0.5)),
                 bytes_to_str(cur_dir_size),
                 style::ResetColor,
@@ -119,7 +119,7 @@ pub fn render_state(stdout: &mut Stdout, state: &mut State) -> Result<()> {
                 style::ResetColor,
                 // style::SetForegroundColor(rgb(0.4, 1.0, 0.5)),
                 style::SetForegroundColor(percent_to_color(size_percent)),
-                format!("{:.2} %", size_percent),
+                size_percent,
                 style::ResetColor,
             )?;
         }
@@ -162,7 +162,7 @@ pub fn render_state(stdout: &mut Stdout, state: &mut State) -> Result<()> {
                 state.term_size[0] as i64 - 46 - if is_scan_done { 0 } else { 3 },
             ),
         );
-        write!(w, "{}  ", "Name")?;
+        write!(w, "Name  ")?;
         for _ in 0..name_col_width - 4 {
             write!(w, " ")?;
         }
@@ -174,7 +174,7 @@ pub fn render_state(stdout: &mut Stdout, state: &mut State) -> Result<()> {
         write!(w, "{:<20}", "Last Modified")?;
         write!(w, "{}", style::ResetColor)?;
 
-        let children = sorted_entries(&file_tree, &state);
+        let children = sorted_entries(&file_tree, state);
         let skip = i64::max(
             0,
             state.cur_subdir_entry_ix() as i64 - ((state.term_size[1] as i64 - 3) / 2),

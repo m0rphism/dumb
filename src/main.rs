@@ -4,7 +4,6 @@ pub mod raw_mode;
 pub mod render;
 pub mod scan;
 
-use std::ffi::OsString;
 use std::io::stdout;
 use std::path::PathBuf;
 use std::sync::mpsc::channel;
@@ -20,7 +19,7 @@ use crate::args::Args;
 use crate::file_tree::FileTree;
 use crate::raw_mode::RawMode;
 use crate::render::{render_state, sorted_entries};
-use crate::scan::{scan, ScanEvent};
+use crate::scan::scan;
 
 #[derive(Clone, Debug)]
 pub enum Event {
@@ -117,7 +116,7 @@ fn run() -> Result<()> {
         let sender = sender.clone();
         move || {
             while let Ok(e) = crossterm::event::read() {
-                if let Err(_) = sender.send(Event::Term(e)) {
+                if sender.send(Event::Term(e)).is_err() {
                     break;
                 }
             }

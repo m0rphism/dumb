@@ -59,7 +59,7 @@ impl FileNode {
     pub fn set_queued(&mut self, path: &Path, inode_id: u64) {
         let mut node = self;
         let cs = path.components().collect::<Vec<_>>();
-        if cs.len() > 0 {
+        if !cs.is_empty() {
             for c in cs.iter().take(cs.len() - 1) {
                 let c = &c.as_os_str().to_os_string();
                 node = node.children.get_mut(c).unwrap()
@@ -72,7 +72,7 @@ impl FileNode {
     }
 
     pub fn set_error(&mut self, path: &Path, error: String) {
-        self.get_mut(&path).unwrap().state = FileState::Failed(error);
+        self.get_mut(path).unwrap().state = FileState::Failed(error);
     }
 
     pub fn finish_file(
@@ -139,7 +139,7 @@ impl FileTree {
             }
             ScanEvent::FinishedScan(path, inode_id) => self.root.finish_file(
                 path,
-                self.inodes.get(&inode_id).unwrap().clone(),
+                *self.inodes.get(&inode_id).unwrap(),
                 &mut self.inodes,
             ),
             ScanEvent::FailedScan(path, err) => self.root.set_error(&path, err),
