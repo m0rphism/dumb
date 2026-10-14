@@ -4,7 +4,6 @@ pub mod raw_mode;
 pub mod render;
 pub mod scan;
 
-use core::num;
 use std::{
     io::stdout,
     path::PathBuf,
