@@ -160,9 +160,18 @@ fn run() -> Result<()> {
                         match key_event.code {
                             KeyCode::Char('q') => break,
                             KeyCode::Char('j') | KeyCode::Down => {
+                                let num_files_in_cur_subdir = state
+                                    .file_tree
+                                    .lock()
+                                    .unwrap()
+                                    .get(&state.cur_subdir)
+                                    .map(|node| node.children.len())
+                                    .unwrap_or(0);
                                 let ix = state.cur_subdir_entry_ix_mut();
-                                *ix += 1;
-                                render_state(&mut stdout, &mut state)?;
+                                if *ix + 1 < num_files_in_cur_subdir {
+                                    *ix += 1;
+                                    render_state(&mut stdout, &mut state)?;
+                                }
                             }
                             KeyCode::Char('k') | KeyCode::Up => {
                                 let ix = state.cur_subdir_entry_ix_mut();
