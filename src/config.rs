@@ -4,7 +4,7 @@ use serde::Deserialize;
 use serde_default_utils::serde_inline_default;
 
 #[serde_inline_default]
-#[derive(Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Config {
     /// Path to a theme toml file.
     /// Relative paths are resolved relative to the config directory, e.g. ~/.config/dumb/.
