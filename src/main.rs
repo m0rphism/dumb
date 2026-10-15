@@ -15,7 +15,7 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use clap::Parser;
-use crossterm::event::{Event as TermEvent, KeyCode, KeyEventKind};
+use crossterm::event::{Event as TermEvent, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::terminal;
 
 use crate::{
@@ -46,12 +46,62 @@ pub struct State {
     pub sort_dirs_before_files: bool,
 }
 
+#[derive(Debug, Clone)]
+pub enum Motion {
+    First,
+    Last,
+    Up,
+    Down,
+    PageUp,
+    PageDown,
+    HalfPageUp,
+    HalfPageDown,
+    Abs(usize),
+    Rel(isize),
+}
+
 impl State {
     pub fn cur_subdir_entry_ix(&self) -> usize {
         *self.cur_subdir_entry_ixs.last().unwrap()
     }
     pub fn cur_subdir_entry_ix_mut(&mut self) -> &mut usize {
         self.cur_subdir_entry_ixs.last_mut().unwrap()
+    }
+    pub fn cur_subdir_entry_len(&self) -> usize {
+        self.file_tree
+            .lock()
+            .unwrap()
+            .get(&self.cur_subdir)
+            .map(|node| node.children.len())
+            .unwrap_or(0)
+    }
+    /// Apply the motion to the file list and return true iff the motion actually changed the
+    /// selected entry.
+    pub fn move_selection(&mut self, motion: Motion) -> bool {
+        let num_entries = self.cur_subdir_entry_len();
+        let last = num_entries.saturating_sub(1);
+        let h = self.term_size[1] as usize - 3;
+        let i = self.cur_subdir_entry_ix_mut();
+        fn set_check(x: &mut usize, y: usize) -> bool {
+            if *x == y {
+                false
+            } else {
+                *x = y;
+                true
+            }
+        }
+        match motion {
+            Motion::First => set_check(i, 0),
+            Motion::Last => set_check(i, last),
+            Motion::Up => set_check(i, i.saturating_sub(1)),
+            Motion::Down => set_check(i, (*i + 1).min(last)),
+            Motion::PageUp => set_check(i, i.saturating_sub(h)),
+            Motion::PageDown => set_check(i, (*i + h).min(last)),
+            Motion::HalfPageUp => set_check(i, i.saturating_sub(h / 2)),
+            Motion::HalfPageDown => set_check(i, (*i + h / 2).min(last)),
+            Motion::Abs(j) => set_check(i, j.min(last)),
+            Motion::Rel(j) => set_check(i, (i.saturating_add_signed(j)).min(last)),
+        }
     }
 }
 
@@ -190,33 +240,16 @@ fn run() -> Result<()> {
 
     for event in receiver {
         // println!("Received: {event:?}");
-        match event {
+        let redraw = match event {
             Event::Term(event) => match event {
                 TermEvent::Key(key_event) => {
                     if key_event.kind != KeyEventKind::Release {
                         match key_event.code {
                             KeyCode::Char('q') => break,
                             KeyCode::Char('j') | KeyCode::Down => {
-                                let num_files_in_cur_subdir = state
-                                    .file_tree
-                                    .lock()
-                                    .unwrap()
-                                    .get(&state.cur_subdir)
-                                    .map(|node| node.children.len())
-                                    .unwrap_or(0);
-                                let ix = state.cur_subdir_entry_ix_mut();
-                                if *ix + 1 < num_files_in_cur_subdir {
-                                    *ix += 1;
-                                    render_state(&mut stdout, &mut state, &theme)?;
-                                }
+                                state.move_selection(Motion::Down)
                             }
-                            KeyCode::Char('k') | KeyCode::Up => {
-                                let ix = state.cur_subdir_entry_ix_mut();
-                                if *ix > 0 {
-                                    *ix -= 1;
-                                    render_state(&mut stdout, &mut state, &theme)?;
-                                }
-                            }
+                            KeyCode::Char('k') | KeyCode::Up => state.move_selection(Motion::Up),
                             KeyCode::Char('h') | KeyCode::Left => {
                                 if let Some(p) = state.cur_subdir.parent() {
                                     state.cur_subdir = p.to_path_buf();
@@ -224,7 +257,9 @@ fn run() -> Result<()> {
                                     if state.cur_subdir_entry_ixs.is_empty() {
                                         state.cur_subdir_entry_ixs.push(0)
                                     }
-                                    render_state(&mut stdout, &mut state, &theme)?;
+                                    true
+                                } else {
+                                    false
                                 }
                             }
                             KeyCode::Char('l') | KeyCode::Right => {
@@ -243,53 +278,56 @@ fn run() -> Result<()> {
                                 };
                                 if redraw {
                                     state.cur_subdir_entry_ixs.push(0);
-                                    render_state(&mut stdout, &mut state, &theme)?;
                                 }
+                                redraw
                             }
                             KeyCode::Char('g') | KeyCode::Home => {
-                                let ix = state.cur_subdir_entry_ix_mut();
-                                if *ix > 0 {
-                                    *ix = 0;
-                                    render_state(&mut stdout, &mut state, &theme)?;
-                                }
+                                state.move_selection(Motion::First)
                             }
-                            KeyCode::Char('G') | KeyCode::End => {
-                                let num_files_in_cur_subdir = state
-                                    .file_tree
-                                    .lock()
-                                    .unwrap()
-                                    .get(&state.cur_subdir)
-                                    .map(|node| node.children.len())
-                                    .unwrap_or(0);
-                                let ix = state.cur_subdir_entry_ix_mut();
-
-                                if *ix + 1 < num_files_in_cur_subdir {
-                                    *ix = num_files_in_cur_subdir.saturating_sub(1);
-                                    render_state(&mut stdout, &mut state, &theme)?;
-                                }
+                            KeyCode::Char('G') | KeyCode::End => state.move_selection(Motion::Last),
+                            KeyCode::Char('f') if key_event.modifiers == KeyModifiers::CONTROL => {
+                                state.move_selection(Motion::PageDown)
+                            }
+                            KeyCode::PageDown => state.move_selection(Motion::PageDown),
+                            KeyCode::Char('b') if key_event.modifiers == KeyModifiers::CONTROL => {
+                                state.move_selection(Motion::PageUp)
+                            }
+                            KeyCode::PageUp => state.move_selection(Motion::PageUp),
+                            KeyCode::Char('d') if key_event.modifiers == KeyModifiers::CONTROL => {
+                                state.move_selection(Motion::HalfPageDown)
+                            }
+                            KeyCode::Char('u') if key_event.modifiers == KeyModifiers::CONTROL => {
+                                state.move_selection(Motion::HalfPageUp)
                             }
                             KeyCode::Char('s') => {
                                 state.sort_by = state.sort_by.next();
-                                render_state(&mut stdout, &mut state, &theme)?;
+                                true
                             }
                             KeyCode::Char('S') => {
                                 state.sort_dirs_before_files = !state.sort_dirs_before_files;
-                                render_state(&mut stdout, &mut state, &theme)?;
+                                true
                             }
-                            _ => (),
+                            _ => false,
                         }
+                    } else {
+                        false
                     }
                 }
                 TermEvent::Resize(w, h) => {
-                    state.term_size = [w, h];
-                    render_state(&mut stdout, &mut state, &theme)?;
+                    if state.term_size == [w, h] {
+                        false
+                    } else {
+                        state.term_size = [w, h];
+                        true
+                    }
                 }
-                _ => (),
+                _ => false,
             },
-            Event::Redraw => {
-                render_state(&mut stdout, &mut state, &theme)?;
-            }
+            Event::Redraw => true,
         };
+        if redraw {
+            render_state(&mut stdout, &mut state, &theme)?;
+        }
     }
 
     Ok(())
