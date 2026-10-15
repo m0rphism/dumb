@@ -366,7 +366,7 @@ fn render_file_tree(
             maybe_selected(&style.modtime_delim).to_string()
         );
         let last_modified = last_modified
-            .format("%Y[-]%m[-]%d  %H[:]%M[:]%S")
+            .format("%Y[-]%m[-]%d %H[:]%M[:]%S")
             .to_string()
             .replace("[", &s_delim)
             .replace("]", &s_val);
