@@ -252,6 +252,9 @@ fn render_file_tree(
     ) as usize;
     for (j, (i, (name, node, inode, is_dir))) in children.iter().enumerate().skip(skip).enumerate()
     {
+        if j + 3 >= state.term_size[1] as usize {
+            break;
+        }
         write!(w, "{}", cursor::MoveTo(0, j as u16 + 3))?;
         let is_selected = i == state.cur_subdir_entry_ix();
         let mut x = 0;
@@ -403,7 +406,7 @@ fn render_errors(
             y += 1;
         }
         y += 1;
-        if y > state.term_size[1] {
+        if y >= state.term_size[1] {
             break;
         }
     }
