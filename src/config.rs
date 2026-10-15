@@ -17,6 +17,7 @@ pub struct Config {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SortBy {
     Name,
     Size,
