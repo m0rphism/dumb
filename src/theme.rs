@@ -115,13 +115,25 @@ impl Default for FileTable {
     }
 }
 
+#[serde_inline_default]
 #[derive(Clone, Debug, Deserialize, Default)]
 pub struct Style {
+    #[serde_inline_default(None)]
     pub fg: Option<Color>,
+
+    #[serde_inline_default(None)]
     pub bg: Option<Color>,
+
+    #[serde_inline_default(false)]
     pub bold: bool,
+
+    #[serde_inline_default(false)]
     pub italic: bool,
+
+    #[serde_inline_default(false)]
     pub underlined: bool,
+
+    #[serde_inline_default(false)]
     pub reversed: bool,
 }
 
