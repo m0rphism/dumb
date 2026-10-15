@@ -93,7 +93,7 @@ fn run() -> Result<()> {
                 let content = std::fs::read_to_string(&theme_path)
                     .context(format!("Couldn't read theme file at {theme_path:?}."))?;
                 toml::from_str(&content)
-                    .context(format!("Failed to parse config file at {theme_path:?}."))?
+                    .context(format!("Failed to parse theme file at {theme_path:?}."))?
             }
         }
     };
