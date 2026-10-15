@@ -81,4 +81,24 @@ size_max_color = [1.0, 0.2, 0.2]
 
   # The style for the currently selected row. This style is merged with the styles for the
   # individual cells (`*_value` styles), where the fields of `selected_row` take precedence.
-  selected_row    = { bg = [0.1, 0.1, 0.1] }
+  selected_row = { bg = [0.1, 0.1, 0.1] }
+
+  # Same mechanics as `selected_row`, but used for entries with errors, i.e.
+  # where the entry itself or one of its transitive children could not be
+  # scanned because of e.g. permission errors.
+  error_row = { fg = [1.0, 0.2, 0.2], bg = [0.2, 0.0, 0.0] }
+
+  # Same mechanics as `selected_row`, but used for entries that are selected and have errors.
+  selected_error_row = { fg = [1.0, 0.4, 0.4], bg = [0.4, 0.0, 0.0] }
+
+# Style of the error view, which displays scan errors when pressing `e` or `E`.
+[error_view]
+
+  # The list index number of the error
+  index   = {}
+
+  # The path of the file with the error
+  path    = { fg = [1.0, 0.5, 0.5], bold = true }
+
+  # The actual error message
+  message = { fg = [0.8, 0.3, 0.3] }
