@@ -8,7 +8,7 @@ pub mod theme;
 
 use std::{
     io::stdout,
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::{Arc, Mutex, mpsc::channel},
     time::Duration,
 };
@@ -28,83 +28,6 @@ use crate::{
     theme::Theme,
 };
 
-#[derive(Clone, Debug)]
-pub enum Event {
-    Term(TermEvent),
-    Redraw,
-}
-
-#[derive(Debug)]
-pub struct State {
-    pub target_path: PathBuf,
-    pub file_tree: Arc<Mutex<FileTree>>,
-    pub cur_subdir: PathBuf,
-    pub cur_subdir_entry_ixs: Vec<usize>,
-    pub term_size: [u16; 2],
-    pub frame: usize,
-    pub sort_by: SortBy,
-    pub sort_dirs_before_files: bool,
-}
-
-#[derive(Debug, Clone)]
-pub enum Motion {
-    First,
-    Last,
-    Up,
-    Down,
-    PageUp,
-    PageDown,
-    HalfPageUp,
-    HalfPageDown,
-    Abs(usize),
-    Rel(isize),
-}
-
-impl State {
-    pub fn cur_subdir_entry_ix(&self) -> usize {
-        *self.cur_subdir_entry_ixs.last().unwrap()
-    }
-    pub fn cur_subdir_entry_ix_mut(&mut self) -> &mut usize {
-        self.cur_subdir_entry_ixs.last_mut().unwrap()
-    }
-    pub fn cur_subdir_entry_len(&self) -> usize {
-        self.file_tree
-            .lock()
-            .unwrap()
-            .get(&self.cur_subdir)
-            .map(|node| node.children.len())
-            .unwrap_or(0)
-    }
-    /// Apply the motion to the file list and return true iff the motion actually changed the
-    /// selected entry.
-    pub fn move_selection(&mut self, motion: Motion) -> bool {
-        let num_entries = self.cur_subdir_entry_len();
-        let last = num_entries.saturating_sub(1);
-        let h = self.term_size[1] as usize - 3;
-        let i = self.cur_subdir_entry_ix_mut();
-        fn set_check(x: &mut usize, y: usize) -> bool {
-            if *x == y {
-                false
-            } else {
-                *x = y;
-                true
-            }
-        }
-        match motion {
-            Motion::First => set_check(i, 0),
-            Motion::Last => set_check(i, last),
-            Motion::Up => set_check(i, i.saturating_sub(1)),
-            Motion::Down => set_check(i, (*i + 1).min(last)),
-            Motion::PageUp => set_check(i, i.saturating_sub(h)),
-            Motion::PageDown => set_check(i, (*i + h).min(last)),
-            Motion::HalfPageUp => set_check(i, i.saturating_sub(h / 2)),
-            Motion::HalfPageDown => set_check(i, (*i + h / 2).min(last)),
-            Motion::Abs(j) => set_check(i, j.min(last)),
-            Motion::Rel(j) => set_check(i, (i.saturating_add_signed(j)).min(last)),
-        }
-    }
-}
-
 fn main() {
     if let Err(e) = run() {
         let err_str = format!("{e:?}");
@@ -122,10 +45,10 @@ fn run() -> Result<()> {
         .target
         .unwrap_or_else(|| std::env::current_dir().unwrap());
 
+    let file_tree = Arc::new(Mutex::new(FileTree::new(&target_path)));
+
     let (sender, receiver) = channel();
     let (done_sender, done_receiver) = channel();
-
-    let file_tree = Arc::new(Mutex::new(FileTree::new(&target_path)));
 
     // Spawn thread that scans the `target_path`.
     let _scan_handle = std::thread::spawn({
@@ -144,6 +67,7 @@ fn run() -> Result<()> {
         }
     });
 
+    // Spawn thread that periodically sends redraw events until scan completed.
     let _redraw_handle = std::thread::spawn({
         let sender = sender.clone();
         move || -> Result<()> {
@@ -337,4 +261,81 @@ fn load_config_and_theme(config_path: &Option<PathBuf>) -> Result<(Config, Theme
     };
 
     Ok((config, theme))
+}
+
+#[derive(Clone, Debug)]
+pub enum Event {
+    Term(TermEvent),
+    Redraw,
+}
+
+#[derive(Debug)]
+pub struct State {
+    pub target_path: PathBuf,
+    pub file_tree: Arc<Mutex<FileTree>>,
+    pub cur_subdir: PathBuf,
+    pub cur_subdir_entry_ixs: Vec<usize>,
+    pub term_size: [u16; 2],
+    pub frame: usize,
+    pub sort_by: SortBy,
+    pub sort_dirs_before_files: bool,
+}
+
+impl State {
+    pub fn cur_subdir_entry_ix(&self) -> usize {
+        *self.cur_subdir_entry_ixs.last().unwrap()
+    }
+    pub fn cur_subdir_entry_ix_mut(&mut self) -> &mut usize {
+        self.cur_subdir_entry_ixs.last_mut().unwrap()
+    }
+    pub fn cur_subdir_entry_len(&self) -> usize {
+        self.file_tree
+            .lock()
+            .unwrap()
+            .get(&self.cur_subdir)
+            .map(|node| node.children.len())
+            .unwrap_or(0)
+    }
+    /// Apply the motion to the file list and return true iff the motion actually changed the
+    /// selected entry.
+    pub fn move_selection(&mut self, motion: Motion) -> bool {
+        let num_entries = self.cur_subdir_entry_len();
+        let last = num_entries.saturating_sub(1);
+        let h = self.term_size[1] as usize - 3;
+        let i = self.cur_subdir_entry_ix_mut();
+        fn set_check(x: &mut usize, y: usize) -> bool {
+            if *x == y {
+                false
+            } else {
+                *x = y;
+                true
+            }
+        }
+        match motion {
+            Motion::First => set_check(i, 0),
+            Motion::Last => set_check(i, last),
+            Motion::Up => set_check(i, i.saturating_sub(1)),
+            Motion::Down => set_check(i, (*i + 1).min(last)),
+            Motion::PageUp => set_check(i, i.saturating_sub(h)),
+            Motion::PageDown => set_check(i, (*i + h).min(last)),
+            Motion::HalfPageUp => set_check(i, i.saturating_sub(h / 2)),
+            Motion::HalfPageDown => set_check(i, (*i + h / 2).min(last)),
+            Motion::Abs(j) => set_check(i, j.min(last)),
+            Motion::Rel(j) => set_check(i, (i.saturating_add_signed(j)).min(last)),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum Motion {
+    First,
+    Last,
+    Up,
+    Down,
+    PageUp,
+    PageDown,
+    HalfPageUp,
+    HalfPageDown,
+    Abs(usize),
+    Rel(isize),
 }
