@@ -175,7 +175,7 @@ impl Style {
             reversed: other.reversed,
         }
     }
-    pub fn write(&self, mut w: impl Write) -> Result<(), std::io::Error> {
+    pub fn write(&self, mut w: &mut impl Write) -> Result<(), std::io::Error> {
         if let Some(fg) = self.fg {
             write!(w, "{}", SetForegroundColor(color_to_crossterm(&fg)))?;
         }
@@ -196,7 +196,7 @@ impl Style {
         }
         Ok(())
     }
-    pub fn write_text(&self, mut w: impl Write, content: &str) -> Result<(), std::io::Error> {
+    pub fn write_text(&self, mut w: &mut impl Write, content: &str) -> Result<(), std::io::Error> {
         self.write(&mut w)?;
         write!(w, "{}{}", content, ResetColor)?;
         Ok(())

@@ -76,266 +76,304 @@ pub fn render_state(stdout: &mut Stdout, state: &mut State, theme: &Theme) -> Re
 
     write!(w, "{}", Clear(ClearType::All))?;
 
-    {
+    let render_info = {
         let file_tree = state.file_tree.lock().unwrap();
-        let cur_dir_size = file_tree
-            .get(&state.cur_subdir)
-            .and_then(|n| file_tree.inodes.get(&n.inode_id).map(|n| n.size_in_bytes))
-            .unwrap_or(0);
-        let target_dir_size = file_tree
-            .get(&PathBuf::from(""))
-            .and_then(|n| file_tree.inodes.get(&n.inode_id).map(|n| n.size_in_bytes))
-            .unwrap_or(0);
-        let target_dir_state = &file_tree.get(&PathBuf::from("")).as_ref().unwrap().state;
-
-        write!(w, "{}", cursor::MoveTo(0, 0))?;
-        let style = &theme.header;
-
-        // Current Directory
-        let prefix_str = state.target_path.to_string_lossy();
-        let suffix_str = state.cur_subdir.to_string_lossy();
-        style.label.write_text(&mut w, "Current Directory: ")?;
-        style.path_prefix.write_text(&mut w, prefix_str.as_ref())?;
-        style.label.write_text(&mut w, "/")?;
-        style.path_suffix.write_text(&mut w, suffix_str.as_ref())?;
-        style.label.write_text(&mut w, ", ")?;
-
-        // Size
-        if state.cur_subdir.to_string_lossy().is_empty() {
-            let target_size_str = bytes_to_str(target_dir_size);
-            style.label.write_text(&mut w, "Size: ")?;
-            style.size_total.write_text(&mut w, &target_size_str)?;
-        } else {
-            let size_percent = (cur_dir_size as f64 / target_dir_size as f64) * 100.0;
-            let target_size_str = bytes_to_str(target_dir_size);
-            let cur_dir_size_str = bytes_to_str(cur_dir_size);
-            style.label.write_text(&mut w, "Size: ")?;
-            style.size_current.write_text(&mut w, &cur_dir_size_str)?;
-            style.label.write_text(&mut w, " / ")?;
-            style.size_total.write_text(&mut w, &target_size_str)?;
-            style.label.write_text(&mut w, " (")?;
-            if let Some(s) = &style.size_percent {
-                s.write_text(&mut w, &format!("{size_percent:.2}"))?;
-            } else {
-                let s = style::SetForegroundColor(color_to_crossterm(&percent_to_color(
-                    size_percent,
-                    &theme,
-                )));
-                write!(w, "{s}{size_percent:.2}{}", ResetColor)?;
-            }
-            style.label.write_text(&mut w, ")")?;
+        RenderInfo {
+            cur_dir_size: file_tree
+                .get(&state.cur_subdir)
+                .and_then(|n| file_tree.inodes.get(&n.inode_id).map(|n| n.size_in_bytes))
+                .unwrap_or(0),
+            target_dir_size: file_tree
+                .get(&PathBuf::from(""))
+                .and_then(|n| file_tree.inodes.get(&n.inode_id).map(|n| n.size_in_bytes))
+                .unwrap_or(0),
+            target_dir_state: file_tree
+                .get(&PathBuf::from(""))
+                .as_ref()
+                .unwrap()
+                .state
+                .clone(),
+            num_errors: file_tree.errors.len(),
         }
-        style.label.write_text(&mut w, ", ")?;
+    };
 
-        // Sort Mode
-        style.label.write_text(&mut w, "Sort by ")?;
-        style
-            .sort_mode
-            .write_text(&mut w, &format!("{:?}", state.sort_by))?;
-
-        // Errors
-        if file_tree.errors.len() > 0 {
-            style.label.write_text(&mut w, ", ")?;
-            let error_string = if file_tree.errors.len() == 1 {
-                "error"
-            } else {
-                "errors"
-            };
-            style.error.write_text(
-                &mut w,
-                &format!("{} {}", file_tree.errors.len(), error_string),
-            )?;
-        }
-
-        // Progress State
-        let is_scan_done = match target_dir_state {
-            FileState::Queued | FileState::InProgress => {
-                style.label.write(&mut w)?;
-                write!(w, ", Scanning {}", loading_text(state.frame))?;
-                false
-            }
-            FileState::Finished => true,
-            FileState::Failed(err) => {
-                style.label.write(&mut w)?;
-                write!(
-                    w,
-                    ", {}ERROR: {}{}",
-                    style::SetForegroundColor(rgb(1.0, 0.0, 0.0)),
-                    err,
-                    style::ResetColor,
-                )?;
-                true
-            }
-        };
-
-        // File View Header
-        write!(w, "{}", cursor::MoveTo(0, 2))?;
-        let style = &theme.file_table;
-        if !is_scan_done {
-            style.progress_header.write_text(&mut w, "S")?;
-            write!(w, "  ")?;
-        }
-        let name_col_width = i64::max(
-            8,
-            i64::min(
-                32,
-                state.term_size[0] as i64 - 46 - if is_scan_done { 0 } else { 3 },
-            ),
-        );
-        style.name_header.write_text(&mut w, "Name")?;
-        write!(w, "  ")?;
-        for _ in 0..name_col_width - 4 {
-            write!(w, " ")?;
-        }
-
-        write!(w, "  ")?;
-        style.size_abs_header.write_text(&mut w, "Size Abs")?;
-        write!(w, "  ")?;
-
-        write!(w, "  ")?;
-        style.size_rel_header.write_text(&mut w, "Size Rel")?;
-        write!(w, "  ")?;
-
-        if !state.cur_subdir.to_string_lossy().is_empty() {
-            write!(w, "  ")?;
-            style.size_cur_header.write_text(&mut w, "Size Cur")?;
-            write!(w, "  ")?;
-        }
-        style.modtime_header.write_text(&mut w, "Last Modified")?;
-
-        // File View Rows
-        let children = sorted_entries(&file_tree, state);
-        let skip = i64::max(
-            0,
-            state.cur_subdir_entry_ix() as i64 - ((state.term_size[1] as i64 - 3) / 2),
-        ) as usize;
-        for (j, (i, (name, node, inode, is_dir))) in
-            children.iter().enumerate().skip(skip).enumerate()
-        {
-            write!(w, "{}", cursor::MoveTo(0, j as u16 + 3))?;
-            let is_selected = i == state.cur_subdir_entry_ix();
-            let mut x = 0;
-
-            let maybe_selected = |s: &Style| {
-                if is_selected {
-                    s.merge(&style.selected_row)
-                } else {
-                    s.clone()
-                }
-            };
-
-            let bg_style = maybe_selected(&Style::default());
-
-            // State
-            if !is_scan_done {
-                let state_str = match node.state {
-                    FileState::Queued | FileState::InProgress => "…",
-                    FileState::Finished => " ",
-                    FileState::Failed(_) => "E",
-                };
-                maybe_selected(&style.progress_value).write_text(&mut w, state_str)?;
-                bg_style.write_text(&mut w, "  ")?;
-                x += 3;
-            }
-
-            // File Name
-            let mut name = name
-                .to_string_lossy()
-                .chars()
-                .take(name_col_width as usize)
-                .collect::<String>();
-            if *is_dir {
-                name += "/";
-            }
-            let s = if inode.is_dir {
-                &style.name_dir_value
-            } else {
-                &style.name_file_value
-            };
-            maybe_selected(&style.progress_value).write_text(&mut w, &name)?;
-            x += name_col_width;
-
-            // Make sure background color is printed even if name is shorter than max length.
-            if is_selected {
-                let spaces: String = (name.chars().count()..name_col_width as usize)
-                    .map(|_| " ")
-                    .collect();
-                bg_style.write_text(&mut w, &spaces)?;
-            } else {
-                write!(w, "{}", cursor::MoveTo(x as u16, j as u16 + 3))?;
-            };
-            bg_style.write_text(&mut w, "  ")?;
-
-            // Size Abs
-            let size_abs_str = bytes_to_str(inode.size_in_bytes);
-            let spaces: String = (size_abs_str.len()..10).map(|_| " ").collect();
-            bg_style.write_text(&mut w, &spaces)?;
-            maybe_selected(&style.size_abs_value).write_text(&mut w, &size_abs_str)?;
-            bg_style.write_text(&mut w, "  ")?;
-
-            // Size Rel
-            let abs_size_percent = (inode.size_in_bytes as f64 / target_dir_size as f64) * 100.0;
-            let abs_size_percent_str = format!("{:6.2} %", abs_size_percent);
-            let spaces: String = (abs_size_percent_str.len()..10).map(|_| " ").collect();
-            bg_style.write_text(&mut w, &spaces)?;
-            if let Some(s) = &style.size_rel_value {
-                s.write(&mut w)?;
-            } else {
-                bg_style
-                    .clone()
-                    .fg(percent_to_color(abs_size_percent, theme))
-                    .write(&mut w)?;
-            }
-            write!(w, "{}", abs_size_percent_str)?;
-            write!(w, "{}", style::ResetColor)?;
-            bg_style.write_text(&mut w, "  ")?;
-
-            // Size Cur
-            if !state.cur_subdir.to_string_lossy().is_empty() {
-                let size_percent = (inode.size_in_bytes as f64 / cur_dir_size as f64) * 100.0;
-                let size_percent_str = format!("{:6.2} %", size_percent);
-                let spaces: String = (abs_size_percent_str.len()..10).map(|_| " ").collect();
-                bg_style.write_text(&mut w, &spaces)?;
-                if let Some(s) = &style.size_cur_value {
-                    s.write(&mut w)?;
-                } else {
-                    bg_style
-                        .clone()
-                        .fg(percent_to_color(abs_size_percent, theme))
-                        .write(&mut w)?;
-                }
-                write!(w, "{}", size_percent_str)?;
-                write!(w, "{}", style::ResetColor)?;
-                bg_style.write_text(&mut w, "  ")?;
-            }
-
-            // Last Modified
-            let last_modified = DateTime::<Local>::from(inode.last_modified);
-            let s_val = format!(
-                "{}{}",
-                ResetColor,
-                maybe_selected(&style.modtime_value).to_string()
-            );
-            let s_delim = format!(
-                "{}{}",
-                ResetColor,
-                maybe_selected(&style.modtime_delim).to_string()
-            );
-            let last_modified = last_modified
-                .format("%Y[-]%m[-]%d  %H[:]%M[:]%S")
-                .to_string()
-                .replace("[", &s_delim)
-                .replace("]", &s_val);
-            write!(w, "{}", s_val)?;
-            write!(w, "{}", last_modified)?;
-            write!(w, "{}", style::ResetColor)?;
-        }
-    }
+    render_header(&mut w, state, theme, &render_info)?;
+    render_file_tree(&mut w, state, theme, &render_info)?;
 
     state.frame += 1;
 
     stdout.write_all(&w)?;
     stdout.flush()?;
+
+    Ok(())
+}
+
+pub struct RenderInfo {
+    pub cur_dir_size: u64,
+    pub target_dir_size: u64,
+    pub target_dir_state: FileState,
+    pub num_errors: usize,
+}
+
+fn render_header(
+    w: &mut impl Write,
+    state: &mut State,
+    theme: &Theme,
+    ri: &RenderInfo,
+) -> Result<()> {
+    write!(w, "{}", cursor::MoveTo(0, 0))?;
+    let style = &theme.header;
+
+    // Current Directory
+    let prefix_str = state.target_path.to_string_lossy();
+    let suffix_str = state.cur_subdir.to_string_lossy();
+    style.label.write_text(w, "Current Directory: ")?;
+    style.path_prefix.write_text(w, prefix_str.as_ref())?;
+    style.label.write_text(w, "/")?;
+    style.path_suffix.write_text(w, suffix_str.as_ref())?;
+    style.label.write_text(w, ", ")?;
+
+    // Size
+    if state.cur_subdir.to_string_lossy().is_empty() {
+        let target_size_str = bytes_to_str(ri.target_dir_size);
+        style.label.write_text(w, "Size: ")?;
+        style.size_total.write_text(w, &target_size_str)?;
+    } else {
+        let size_percent = (ri.cur_dir_size as f64 / ri.target_dir_size as f64) * 100.0;
+        let target_size_str = bytes_to_str(ri.target_dir_size);
+        let cur_dir_size_str = bytes_to_str(ri.cur_dir_size);
+        style.label.write_text(w, "Size: ")?;
+        style.size_current.write_text(w, &cur_dir_size_str)?;
+        style.label.write_text(w, " / ")?;
+        style.size_total.write_text(w, &target_size_str)?;
+        style.label.write_text(w, " (")?;
+        if let Some(s) = &style.size_percent {
+            s.write_text(w, &format!("{size_percent:.2}"))?;
+        } else {
+            let s = style::SetForegroundColor(color_to_crossterm(&percent_to_color(
+                size_percent,
+                &theme,
+            )));
+            write!(w, "{s}{size_percent:.2}{}", ResetColor)?;
+        }
+        style.label.write_text(w, ")")?;
+    }
+    style.label.write_text(w, ", ")?;
+
+    // Sort Mode
+    style.label.write_text(w, "Sort by ")?;
+    style
+        .sort_mode
+        .write_text(w, &format!("{:?}", state.sort_by))?;
+
+    // Errors
+    if ri.num_errors > 0 {
+        style.label.write_text(w, ", ")?;
+        let err_str = if ri.num_errors == 1 {
+            "error"
+        } else {
+            "errors"
+        };
+        style
+            .error
+            .write_text(w, &format!("{} {}", ri.num_errors, err_str))?;
+    }
+
+    // Progress State
+    match &ri.target_dir_state {
+        FileState::Queued | FileState::InProgress => {
+            style.label.write(w)?;
+            write!(w, ", Scanning {}", loading_text(state.frame))?;
+        }
+        FileState::Finished => (),
+        FileState::Failed(err) => {
+            style.label.write(w)?;
+            write!(
+                w,
+                ", {}ERROR: {}{}",
+                style::SetForegroundColor(rgb(1.0, 0.0, 0.0)),
+                err,
+                style::ResetColor,
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
+fn render_file_tree(
+    w: &mut impl Write,
+    state: &mut State,
+    theme: &Theme,
+    ri: &RenderInfo,
+) -> Result<()> {
+    let is_scan_done = match ri.target_dir_state {
+        FileState::Queued | FileState::InProgress => false,
+        FileState::Finished | FileState::Failed(_) => true,
+    };
+
+    // File View Header
+    write!(w, "{}", cursor::MoveTo(0, 2))?;
+    let style = &theme.file_table;
+    if !is_scan_done {
+        style.progress_header.write_text(w, "S")?;
+        write!(w, "  ")?;
+    }
+    let name_col_width = i64::max(
+        8,
+        i64::min(
+            32,
+            state.term_size[0] as i64 - 46 - if is_scan_done { 0 } else { 3 },
+        ),
+    );
+    style.name_header.write_text(w, "Name")?;
+    write!(w, "  ")?;
+    for _ in 0..name_col_width - 4 {
+        write!(w, " ")?;
+    }
+
+    write!(w, "  ")?;
+    style.size_abs_header.write_text(w, "Size Abs")?;
+    write!(w, "  ")?;
+
+    write!(w, "  ")?;
+    style.size_rel_header.write_text(w, "Size Rel")?;
+    write!(w, "  ")?;
+
+    if !state.cur_subdir.to_string_lossy().is_empty() {
+        write!(w, "  ")?;
+        style.size_cur_header.write_text(w, "Size Cur")?;
+        write!(w, "  ")?;
+    }
+    style.modtime_header.write_text(w, "Last Modified")?;
+
+    // File View Rows
+    let file_tree = state.file_tree.lock().unwrap();
+    let children = sorted_entries(&file_tree, state);
+    let skip = i64::max(
+        0,
+        state.cur_subdir_entry_ix() as i64 - ((state.term_size[1] as i64 - 3) / 2),
+    ) as usize;
+    for (j, (i, (name, node, inode, is_dir))) in children.iter().enumerate().skip(skip).enumerate()
+    {
+        write!(w, "{}", cursor::MoveTo(0, j as u16 + 3))?;
+        let is_selected = i == state.cur_subdir_entry_ix();
+        let mut x = 0;
+
+        let maybe_selected = |s: &Style| {
+            if is_selected {
+                s.merge(&style.selected_row)
+            } else {
+                s.clone()
+            }
+        };
+
+        let bg_style = maybe_selected(&Style::default());
+
+        // State
+        if !is_scan_done {
+            let state_str = match node.state {
+                FileState::Queued | FileState::InProgress => "…",
+                FileState::Finished => " ",
+                FileState::Failed(_) => "E",
+            };
+            maybe_selected(&style.progress_value).write_text(w, state_str)?;
+            bg_style.write_text(w, "  ")?;
+            x += 3;
+        }
+
+        // File Name
+        let mut name = name
+            .to_string_lossy()
+            .chars()
+            .take(name_col_width as usize)
+            .collect::<String>();
+        if *is_dir {
+            name += "/";
+        }
+        let s = if inode.is_dir {
+            &style.name_dir_value
+        } else {
+            &style.name_file_value
+        };
+        maybe_selected(&s).write_text(w, &name)?;
+        x += name_col_width;
+
+        // Make sure background color is printed even if name is shorter than max length.
+        if is_selected {
+            let spaces: String = (name.chars().count()..name_col_width as usize)
+                .map(|_| " ")
+                .collect();
+            bg_style.write_text(w, &spaces)?;
+        } else {
+            write!(w, "{}", cursor::MoveTo(x as u16, j as u16 + 3))?;
+        };
+        bg_style.write_text(w, "  ")?;
+
+        // Size Abs
+        let size_abs_str = bytes_to_str(inode.size_in_bytes);
+        let spaces: String = (size_abs_str.len()..10).map(|_| " ").collect();
+        bg_style.write_text(w, &spaces)?;
+        maybe_selected(&style.size_abs_value).write_text(w, &size_abs_str)?;
+        bg_style.write_text(w, "  ")?;
+
+        // Size Rel
+        let abs_size_percent = (inode.size_in_bytes as f64 / ri.target_dir_size as f64) * 100.0;
+        let abs_size_percent_str = format!("{:6.2} %", abs_size_percent);
+        let spaces: String = (abs_size_percent_str.len()..10).map(|_| " ").collect();
+        bg_style.write_text(w, &spaces)?;
+        if let Some(s) = &style.size_rel_value {
+            s.write(w)?;
+        } else {
+            bg_style
+                .clone()
+                .fg(percent_to_color(abs_size_percent, theme))
+                .write(w)?;
+        }
+        write!(w, "{}", abs_size_percent_str)?;
+        write!(w, "{}", style::ResetColor)?;
+        bg_style.write_text(w, "  ")?;
+
+        // Size Cur
+        if !state.cur_subdir.to_string_lossy().is_empty() {
+            let size_percent = (inode.size_in_bytes as f64 / ri.cur_dir_size as f64) * 100.0;
+            let size_percent_str = format!("{:6.2} %", size_percent);
+            let spaces: String = (abs_size_percent_str.len()..10).map(|_| " ").collect();
+            bg_style.write_text(w, &spaces)?;
+            if let Some(s) = &style.size_cur_value {
+                s.write(w)?;
+            } else {
+                bg_style
+                    .clone()
+                    .fg(percent_to_color(abs_size_percent, theme))
+                    .write(w)?;
+            }
+            write!(w, "{}", size_percent_str)?;
+            write!(w, "{}", style::ResetColor)?;
+            bg_style.write_text(w, "  ")?;
+        }
+
+        // Last Modified
+        let last_modified = DateTime::<Local>::from(inode.last_modified);
+        let s_val = format!(
+            "{}{}",
+            ResetColor,
+            maybe_selected(&style.modtime_value).to_string()
+        );
+        let s_delim = format!(
+            "{}{}",
+            ResetColor,
+            maybe_selected(&style.modtime_delim).to_string()
+        );
+        let last_modified = last_modified
+            .format("%Y[-]%m[-]%d  %H[:]%M[:]%S")
+            .to_string()
+            .replace("[", &s_delim)
+            .replace("]", &s_val);
+        write!(w, "{}", s_val)?;
+        write!(w, "{}", last_modified)?;
+        write!(w, "{}", style::ResetColor)?;
+    }
 
     Ok(())
 }
