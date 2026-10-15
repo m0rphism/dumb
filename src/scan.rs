@@ -6,7 +6,7 @@ use std::{
     time::SystemTime,
 };
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 pub type InodeId = u64;
 
@@ -43,6 +43,8 @@ impl ScanEvent {
     }
 }
 
+/// Scan all filesystem entries of `dir` transitively and emit events via the `on_event` handler.
+/// This function returns `Err` only if `on_event` returns `Err`.
 pub fn scan(
     dir: impl AsRef<Path>,
     mut on_event: impl FnMut(ScanEvent) -> Result<()>,
@@ -62,11 +64,23 @@ fn scan_(
         Err(e) => {
             on_event(ScanEvent::FailedScan(
                 path.to_path_buf(),
-                format!("Cannot read directory '{path:?}':\n{e}"),
+                format!("Cannot read metadata of path '{path:?}':\n{e}"),
             ))?;
             return Ok((0, SystemTime::UNIX_EPOCH));
         }
     };
+
+    let mut last_modified = match meta.modified() {
+        Ok(t) => t,
+        Err(e) => {
+            on_event(ScanEvent::FailedScan(
+                path.to_path_buf(),
+                format!("Cannot read modtime of path '{path:?}' (using UNIX_EPOCH instead):\n{e}"),
+            ))?;
+            SystemTime::UNIX_EPOCH
+        }
+    };
+
     let inode_id = meta.ino();
     on_event(ScanEvent::StartedScan(
         path.to_path_buf(),
@@ -78,19 +92,18 @@ fn scan_(
         },
     ))?;
 
-    let (size_in_bytes, last_modified) = if meta.is_dir() && !meta.is_symlink() {
+    let size_in_bytes = if meta.is_dir() && !meta.is_symlink() {
         let iter = match path.read_dir() {
             Ok(iter) => iter,
             Err(e) => {
                 on_event(ScanEvent::FailedScan(
                     path.to_path_buf(),
-                    format!("Cannot read directory '{path:?}':\n{e}"),
+                    format!("Cannot read directory contents of '{path:?}':\n{e}"),
                 ))?;
                 return Ok((0, SystemTime::UNIX_EPOCH));
             }
         };
         let mut size_in_bytes = 0;
-        let mut last_modified = meta.modified().unwrap();
         for e in iter {
             let e = match e {
                 Ok(e) => e,
@@ -112,11 +125,10 @@ fn scan_(
                 is_dir: true,
             },
         ))?;
-        (size_in_bytes, last_modified)
+        size_in_bytes
     } else {
         if visited_inodes.insert(inode_id) {
             let size_in_bytes = meta.size();
-            let last_modified = meta.modified().unwrap();
             on_event(ScanEvent::NewInode(
                 inode_id,
                 Inode {
@@ -126,11 +138,9 @@ fn scan_(
                     is_dir: false,
                 },
             ))?;
-            (size_in_bytes, last_modified)
+            size_in_bytes
         } else {
-            let size_in_bytes = 0;
-            let last_modified = meta.modified().unwrap();
-            (size_in_bytes, last_modified)
+            0
         }
     };
 
