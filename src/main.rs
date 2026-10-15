@@ -57,8 +57,9 @@ impl State {
 
 fn main() {
     if let Err(e) = run() {
-        println!("{e}");
-        std::fs::write("dumb.log", e.to_string()).unwrap();
+        let err_str = format!("{e:?}");
+        eprintln!("{}", err_str);
+        std::fs::write("dumb.log", &err_str).unwrap();
     }
 }
 fn run() -> Result<()> {
