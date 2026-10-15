@@ -49,20 +49,18 @@ pub fn sorted_entries<'a>(
             });
         }
         SortBy::Size => {
-            children.sort_by_key(|(_name, _node, inode, _is_dir)| {
-                // let is_file = !*is_dir && state.sort_dirs_before_files;
-                // (is_file, inode.size_in_bytes)
-                inode.size_in_bytes
-            });
-            children.reverse();
+            children.sort_by(
+                |(name1, _node1, inode1, _is_dir1), (name2, _node2, inode2, _is_dir2)| {
+                    (inode2.size_in_bytes, *name1).cmp(&(inode1.size_in_bytes, *name2))
+                },
+            );
         }
         SortBy::ModTime => {
-            children.sort_by_key(|(_name, _node, inode, _is_dir)| {
-                // let is_file = !*is_dir && state.sort_dirs_before_files;
-                // (is_file, inode.last_modified)
-                inode.last_modified
-            });
-            children.reverse();
+            children.sort_by(
+                |(name1, _node1, inode1, _is_dir1), (name2, _node2, inode2, _is_dir2)| {
+                    (inode2.last_modified, *name1).cmp(&(inode1.last_modified, *name2))
+                },
+            );
         }
     }
     children
