@@ -1,0 +1,7 @@
+# Path to a toml file specifying a theme.
+# Relative paths are resolved relative to the directory containing this config file, e.g. ~/.config/dumb/.
+# See `theme.default.toml` for available theming options.
+theme = "theme.default.toml"
+
+# Can be one of `name`, `size`, or `mod_time`.
+default_sort_mode = "size"

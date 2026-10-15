@@ -1,0 +1,81 @@
+# Value structure:
+# - Colors are RGB arrays, where each component is a float between 0 and 1, e.g.
+#   `[1.0, 0.0, 0.0]` is bright red.
+# - Styles have the following shape:
+#   ```
+#   {
+#     fg         = COLOR,  # foreground color
+#     bg         = COLOR,  # background color
+#     bold       = BOOL,   # bold text
+#     italic     = BOOL,   # italic text
+#     underlined = BOOL,   # underlined text
+#     reversed   = BOOL    # reversed text (swaps fg and bg colors)
+#   }
+#   ```
+#   All fields default to the terminal defaults if omitted.
+
+# Colors to interpolate between for relative sizes.
+# This can be overridden by defining fixed styles for `header.size_percent`,
+# `file_table.size_rel_value`, and `file_table.size_cur_value`.
+size_min_color = [0.2, 0.2, 0.2]
+size_max_color = [1.0, 0.2, 0.2]
+
+# Style of the header line (first line in the terminal)
+[header]
+
+  # Style for captions like `Current Directory:`.
+  # An empty style value uses the terminals default style.
+  label = {}
+  
+  # Styles for the values after the `Current Directory:` label:
+  # - `path_prefix` applies to the directory specified via CLI arguments.
+  # - `path_suffix` applies to everything that comes afterwards.
+  path_prefix = { fg = [0.4, 0.5, 1.0] }
+  path_suffix = { fg = [1.0, 0.4, 0.5] }
+  
+  # Styles for the values after the `Size:` label:
+  # - `size_current` is only visible if the user navigated into a subdirectory, and displays the total size
+  #   of that subdiretory.
+  # - `size_total` is always visible and displays the total size of the directory where `dumb` was started in
+  # - `size_percent` applies to the size percentage display in parentheses.
+  #    Defaults to using a color between `size_min_color` and
+  #    `size_max_color` depending on percentage.
+  size_current = { fg = [1.0, 0.4, 0.5] }
+  size_total   = { fg = [0.4, 0.5, 1.0] }
+  #size_percent = null
+  
+  # Styles for the value after the `Sort by` label.
+  sort_mode = { fg = [0.4, 0.5, 1.0] }
+
+# Style of the fileview below the header line
+[file_table]
+
+  # Styles for the header cells of the file table
+  progress_header = { bold = true }
+  name_header     = { bold = true }
+  size_abs_header = { bold = true }
+  size_rel_header = { bold = true }
+  size_cur_header = { bold = true }
+  modtime_header  = { bold = true }
+  
+  # Styles for the non-header cells of the file table:
+  # - Cells in the `Name` column can use different styles depending on whether the name refers to a
+  #   file (`name_file_value`) or a directory (`name_dir_value`).
+  # - Relative sizes (`size_rel_value`, `size_cur_value`) default to using a
+  #   color between `size_min_color` and `size_max_color` depending on
+  #   percentage.
+  # - The modification time has two styles:
+  #   - `modtime_value` applies to the numbers in the datetime;
+  #   - `modtime_delim` applies to the delimiters, i.e. `-` and `:` characters.
+  progress_value  = {}
+  name_file_value = {}
+  name_dir_value  = { fg = [0.7, 0.7, 0.7] }
+  size_abs_value  = {}
+  #size_rel_value  = null
+  #size_cur_value  = null
+  modtime_value   = {}
+  modtime_delim   = { fg = [0.5, 0.5, 0.5] }
+
+  # The style for the currently selected row. This style is merged with the styles for the
+  # individual cells (`*_value` styles), where the fields of `selected_row` take precedence.
+  selected_row    = { bg = [0.1, 0.1, 0.1] }
