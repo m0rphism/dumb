@@ -152,7 +152,7 @@ fn render_header(
         } else {
             let s = style::SetForegroundColor(color_to_crossterm(&percent_to_color(
                 size_percent,
-                &theme,
+                theme,
             )));
             write!(w, "{s}{size_percent:.2}{}", ResetColor)?;
         }
@@ -296,7 +296,7 @@ fn render_file_tree(
         } else {
             &style.name_file_value
         };
-        maybe_selected(&s).write_text(w, &name)?;
+        maybe_selected(s).write_text(w, &name)?;
         x += name_col_width;
 
         // Make sure background color is printed even if name is shorter than max length.

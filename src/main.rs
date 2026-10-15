@@ -219,9 +219,7 @@ fn load_config_and_theme(config_path: &Option<PathBuf>) -> Result<(Config, Theme
         let config_path = config_path
             .canonicalize()
             .context("Failed to canonicalize config path '{config_path:?}'")?;
-        let config_dir = config_path.parent().expect(&format!(
-            "Config path '{config_path:?}' has no parent directory."
-        ));
+        let config_dir = config_path.parent().unwrap_or_else(|| panic!("Config path '{config_path:?}' has no parent directory."));
         if !config_path.exists() {
             bail!("Config path '{config_path:?}' does not exist.")
         }

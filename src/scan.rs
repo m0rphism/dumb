@@ -6,7 +6,7 @@ use std::{
     time::SystemTime,
 };
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 pub type InodeId = u64;
 

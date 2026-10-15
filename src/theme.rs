@@ -1,4 +1,4 @@
-use std::io::Write;
+use std::{fmt::Display, io::Write};
 
 use crossterm::style::{
     Attribute::{Bold, Italic, Reverse, Underlined},
@@ -167,15 +167,15 @@ impl Style {
     }
     pub fn merge(&self, other: &Self) -> Self {
         Self {
-            fg: self.fg.clone().or_else(|| other.fg.clone()),
-            bg: self.bg.clone().or_else(|| other.bg.clone()),
+            fg: self.fg.or(other.fg),
+            bg: self.bg.or(other.bg),
             bold: other.bold,
             italic: other.italic,
             underlined: other.underlined,
             reversed: other.reversed,
         }
     }
-    pub fn write(&self, mut w: &mut impl Write) -> Result<(), std::io::Error> {
+    pub fn write(&self, w: &mut impl Write) -> Result<(), std::io::Error> {
         if let Some(fg) = self.fg {
             write!(w, "{}", SetForegroundColor(color_to_crossterm(&fg)))?;
         }
@@ -201,10 +201,14 @@ impl Style {
         write!(w, "{}{}", content, ResetColor)?;
         Ok(())
     }
-    pub fn to_string(&self) -> String {
+}
+
+impl Display for Style {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut buf = Vec::new();
-        self.write(&mut buf).unwrap();
-        String::from_utf8(buf).unwrap()
+        self.write(&mut buf).map_err(|_| std::fmt::Error)?;
+        let s = std::str::from_utf8(&buf).map_err(|_| std::fmt::Error)?;
+        f.write_str(s)
     }
 }
 
