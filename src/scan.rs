@@ -64,7 +64,7 @@ fn scan_(
         Err(e) => {
             on_event(ScanEvent::FailedScan(
                 path.to_path_buf(),
-                format!("Cannot read metadata of path '{path:?}':\n{e}"),
+                format!("Cannot read metadata:\n{e}"),
             ))?;
             return Ok((0, SystemTime::UNIX_EPOCH));
         }
@@ -75,7 +75,7 @@ fn scan_(
         Err(e) => {
             on_event(ScanEvent::FailedScan(
                 path.to_path_buf(),
-                format!("Cannot read modtime of path '{path:?}' (using UNIX_EPOCH instead):\n{e}"),
+                format!("Cannot read modtime (using UNIX_EPOCH instead):\n{e}"),
             ))?;
             SystemTime::UNIX_EPOCH
         }
@@ -98,7 +98,7 @@ fn scan_(
             Err(e) => {
                 on_event(ScanEvent::FailedScan(
                     path.to_path_buf(),
-                    format!("Cannot read directory contents of '{path:?}':\n{e}"),
+                    format!("Cannot read directory contents:\n{e}"),
                 ))?;
                 return Ok((0, SystemTime::UNIX_EPOCH));
             }

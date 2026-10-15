@@ -1,6 +1,7 @@
 pub mod args;
 pub mod config;
 pub mod file_tree;
+pub mod motion;
 pub mod raw_mode;
 pub mod render;
 pub mod scan;
@@ -24,6 +25,7 @@ use crate::{
     args::Args,
     config::{Config, SortBy},
     file_tree::FileTree,
+    motion::Motion,
     raw_mode::RawMode,
     render::{render_state, sorted_entries},
     scan::scan,
@@ -113,6 +115,7 @@ fn run() -> Result<()> {
         frame: 0,
         sort_by: config.default_sort_mode,
         sort_dirs_before_files: true,
+        display_mode: DisplayMode::FileTree,
     };
 
     let mut stdout = stdout();
@@ -125,70 +128,168 @@ fn run() -> Result<()> {
             Event::Term(event) => match event {
                 TermEvent::Key(key_event) => {
                     if key_event.kind != KeyEventKind::Release {
-                        match key_event.code {
-                            KeyCode::Char('q') => break,
-                            KeyCode::Char('j') | KeyCode::Down => {
-                                state.move_selection(Motion::Down)
-                            }
-                            KeyCode::Char('k') | KeyCode::Up => state.move_selection(Motion::Up),
-                            KeyCode::Char('h') | KeyCode::Left => {
-                                if let Some(p) = state.cur_subdir.parent() {
-                                    state.cur_subdir = p.to_path_buf();
-                                    state.cur_subdir_entry_ixs.pop();
-                                    if state.cur_subdir_entry_ixs.is_empty() {
-                                        state.cur_subdir_entry_ixs.push(0)
-                                    }
-                                    true
-                                } else {
-                                    false
+                        match &mut state.display_mode {
+                            DisplayMode::FileTree => match key_event.code {
+                                KeyCode::Char('q') => break,
+                                KeyCode::Char('j') | KeyCode::Down => {
+                                    state.apply_motion(Motion::Down)
                                 }
-                            }
-                            KeyCode::Char('l') | KeyCode::Right => {
-                                let redraw = {
-                                    let ix = state.cur_subdir_entry_ix();
-                                    let file_tree = state.file_tree.lock().unwrap();
-                                    let entries = sorted_entries(&file_tree, &state);
-                                    if let Some((cur_name, _node, _inode, _is_dir @ true)) =
-                                        entries.get(ix)
-                                    {
-                                        state.cur_subdir = state.cur_subdir.join(cur_name);
+                                KeyCode::Char('k') | KeyCode::Up => state.apply_motion(Motion::Up),
+                                KeyCode::Char('h') | KeyCode::Left => {
+                                    if let Some(p) = state.cur_subdir.parent() {
+                                        state.cur_subdir = p.to_path_buf();
+                                        state.cur_subdir_entry_ixs.pop();
+                                        if state.cur_subdir_entry_ixs.is_empty() {
+                                            state.cur_subdir_entry_ixs.push(0)
+                                        }
                                         true
                                     } else {
                                         false
                                     }
-                                };
-                                if redraw {
-                                    state.cur_subdir_entry_ixs.push(0);
                                 }
-                                redraw
-                            }
-                            KeyCode::Char('g') | KeyCode::Home => {
-                                state.move_selection(Motion::First)
-                            }
-                            KeyCode::Char('G') | KeyCode::End => state.move_selection(Motion::Last),
-                            KeyCode::Char('f') if key_event.modifiers == KeyModifiers::CONTROL => {
-                                state.move_selection(Motion::PageDown)
-                            }
-                            KeyCode::PageDown => state.move_selection(Motion::PageDown),
-                            KeyCode::Char('b') if key_event.modifiers == KeyModifiers::CONTROL => {
-                                state.move_selection(Motion::PageUp)
-                            }
-                            KeyCode::PageUp => state.move_selection(Motion::PageUp),
-                            KeyCode::Char('d') if key_event.modifiers == KeyModifiers::CONTROL => {
-                                state.move_selection(Motion::HalfPageDown)
-                            }
-                            KeyCode::Char('u') if key_event.modifiers == KeyModifiers::CONTROL => {
-                                state.move_selection(Motion::HalfPageUp)
-                            }
-                            KeyCode::Char('s') => {
-                                state.sort_by = state.sort_by.next();
-                                true
-                            }
-                            KeyCode::Char('S') => {
-                                state.sort_dirs_before_files = !state.sort_dirs_before_files;
-                                true
-                            }
-                            _ => false,
+                                KeyCode::Char('l') | KeyCode::Right => {
+                                    let redraw = {
+                                        let ix = state.cur_subdir_entry_ix();
+                                        let file_tree = state.file_tree.lock().unwrap();
+                                        let entries = sorted_entries(&file_tree, &state);
+                                        if let Some((cur_name, _node, _inode, _is_dir @ true)) =
+                                            entries.get(ix)
+                                        {
+                                            state.cur_subdir = state.cur_subdir.join(cur_name);
+                                            true
+                                        } else {
+                                            false
+                                        }
+                                    };
+                                    if redraw {
+                                        state.cur_subdir_entry_ixs.push(0);
+                                    }
+                                    redraw
+                                }
+                                KeyCode::Char('g') | KeyCode::Home => {
+                                    state.apply_motion(Motion::First)
+                                }
+                                KeyCode::Char('G') | KeyCode::End => {
+                                    state.apply_motion(Motion::Last)
+                                }
+                                KeyCode::Char('f')
+                                    if key_event.modifiers == KeyModifiers::CONTROL =>
+                                {
+                                    state.apply_motion(Motion::PageDown)
+                                }
+                                KeyCode::PageDown => state.apply_motion(Motion::PageDown),
+                                KeyCode::Char('b')
+                                    if key_event.modifiers == KeyModifiers::CONTROL =>
+                                {
+                                    state.apply_motion(Motion::PageUp)
+                                }
+                                KeyCode::PageUp => state.apply_motion(Motion::PageUp),
+                                KeyCode::Char('d')
+                                    if key_event.modifiers == KeyModifiers::CONTROL =>
+                                {
+                                    state.apply_motion(Motion::HalfPageDown)
+                                }
+                                KeyCode::Char('u')
+                                    if key_event.modifiers == KeyModifiers::CONTROL =>
+                                {
+                                    state.apply_motion(Motion::HalfPageUp)
+                                }
+                                KeyCode::Char('s') => {
+                                    state.sort_by = state.sort_by.next();
+                                    true
+                                }
+                                KeyCode::Char('S') => {
+                                    state.sort_dirs_before_files = !state.sort_dirs_before_files;
+                                    true
+                                }
+                                KeyCode::Char('e') => {
+                                    let file_tree = state.file_tree.lock().unwrap();
+                                    let children = sorted_entries(&file_tree, &state);
+                                    if let Some((name, _, _, _)) =
+                                        children.get(state.cur_subdir_entry_ix())
+                                    {
+                                        let cur_path = state.cur_subdir.join(name);
+                                        state.display_mode = DisplayMode::ErrorView(ErrorView {
+                                            errors: file_tree
+                                                .errors
+                                                .iter()
+                                                .filter(|(path, _)| {
+                                                    path.strip_prefix(&cur_path).is_ok()
+                                                })
+                                                .map(|(path, message)| ErrorInfo {
+                                                    path: path.to_string_lossy().to_string(),
+                                                    message: message.clone(),
+                                                })
+                                                .collect(),
+                                            mode: ErrorViewMode::CurEntryErrors,
+                                            cur_error_ix: 0,
+                                        });
+                                        true
+                                    } else {
+                                        false
+                                    }
+                                }
+                                KeyCode::Char('E') => {
+                                    state.display_mode = DisplayMode::ErrorView(ErrorView {
+                                        errors: state
+                                            .file_tree
+                                            .lock()
+                                            .unwrap()
+                                            .errors
+                                            .iter()
+                                            .map(|(path, message)| ErrorInfo {
+                                                path: path.to_string_lossy().to_string(),
+                                                message: message.clone(),
+                                            })
+                                            .collect(),
+                                        mode: ErrorViewMode::AllErrors,
+                                        cur_error_ix: 0,
+                                    });
+                                    true
+                                }
+                                _ => false,
+                            },
+                            DisplayMode::ErrorView(error_view) => match key_event.code {
+                                KeyCode::Char('q') | KeyCode::Char('e') | KeyCode::Char('E') => {
+                                    state.display_mode = DisplayMode::FileTree;
+                                    true
+                                }
+                                KeyCode::Char('j') | KeyCode::Down => {
+                                    error_view.apply_motion(Motion::Down)
+                                }
+                                KeyCode::Char('k') | KeyCode::Up => {
+                                    error_view.apply_motion(Motion::Up)
+                                }
+                                KeyCode::Char('g') | KeyCode::Home => {
+                                    error_view.apply_motion(Motion::First)
+                                }
+                                KeyCode::Char('G') | KeyCode::End => {
+                                    error_view.apply_motion(Motion::Last)
+                                }
+                                KeyCode::Char('f')
+                                    if key_event.modifiers == KeyModifiers::CONTROL =>
+                                {
+                                    error_view.apply_motion(Motion::PageDown)
+                                }
+                                KeyCode::PageDown => error_view.apply_motion(Motion::PageDown),
+                                KeyCode::Char('b')
+                                    if key_event.modifiers == KeyModifiers::CONTROL =>
+                                {
+                                    error_view.apply_motion(Motion::PageUp)
+                                }
+                                KeyCode::PageUp => error_view.apply_motion(Motion::PageUp),
+                                KeyCode::Char('d')
+                                    if key_event.modifiers == KeyModifiers::CONTROL =>
+                                {
+                                    error_view.apply_motion(Motion::HalfPageDown)
+                                }
+                                KeyCode::Char('u')
+                                    if key_event.modifiers == KeyModifiers::CONTROL =>
+                                {
+                                    error_view.apply_motion(Motion::HalfPageUp)
+                                }
+                                _ => false,
+                            },
                         }
                     } else {
                         false
@@ -219,7 +320,9 @@ fn load_config_and_theme(config_path: &Option<PathBuf>) -> Result<(Config, Theme
         let config_path = config_path
             .canonicalize()
             .context("Failed to canonicalize config path '{config_path:?}'")?;
-        let config_dir = config_path.parent().unwrap_or_else(|| panic!("Config path '{config_path:?}' has no parent directory."));
+        let config_dir = config_path
+            .parent()
+            .unwrap_or_else(|| panic!("Config path '{config_path:?}' has no parent directory."));
         if !config_path.exists() {
             bail!("Config path '{config_path:?}' does not exist.")
         }
@@ -269,6 +372,37 @@ pub enum Event {
     Redraw,
 }
 
+#[derive(Debug, Clone)]
+pub enum DisplayMode {
+    FileTree,
+    ErrorView(ErrorView),
+}
+
+#[derive(Debug, Clone)]
+pub struct ErrorView {
+    pub errors: Vec<ErrorInfo>,
+    pub mode: ErrorViewMode,
+    pub cur_error_ix: usize,
+}
+
+impl ErrorView {
+    pub fn apply_motion(&mut self, motion: Motion) -> bool {
+        motion.apply_check(&mut self.cur_error_ix, self.errors.len(), 10)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ErrorInfo {
+    pub path: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ErrorViewMode {
+    AllErrors,
+    CurEntryErrors,
+}
+
 #[derive(Debug)]
 pub struct State {
     pub target_path: PathBuf,
@@ -279,6 +413,7 @@ pub struct State {
     pub frame: usize,
     pub sort_by: SortBy,
     pub sort_dirs_before_files: bool,
+    pub display_mode: DisplayMode,
 }
 
 impl State {
@@ -298,44 +433,10 @@ impl State {
     }
     /// Apply the motion to the file list and return true iff the motion actually changed the
     /// selected entry.
-    pub fn move_selection(&mut self, motion: Motion) -> bool {
+    pub fn apply_motion(&mut self, motion: Motion) -> bool {
         let num_entries = self.cur_subdir_entry_len();
-        let last = num_entries.saturating_sub(1);
-        let h = self.term_size[1] as usize - 3;
+        let height = self.term_size[1] as usize - 3;
         let i = self.cur_subdir_entry_ix_mut();
-        fn set_check(x: &mut usize, y: usize) -> bool {
-            if *x == y {
-                false
-            } else {
-                *x = y;
-                true
-            }
-        }
-        match motion {
-            Motion::First => set_check(i, 0),
-            Motion::Last => set_check(i, last),
-            Motion::Up => set_check(i, i.saturating_sub(1)),
-            Motion::Down => set_check(i, (*i + 1).min(last)),
-            Motion::PageUp => set_check(i, i.saturating_sub(h)),
-            Motion::PageDown => set_check(i, (*i + h).min(last)),
-            Motion::HalfPageUp => set_check(i, i.saturating_sub(h / 2)),
-            Motion::HalfPageDown => set_check(i, (*i + h / 2).min(last)),
-            Motion::Abs(j) => set_check(i, j.min(last)),
-            Motion::Rel(j) => set_check(i, (i.saturating_add_signed(j)).min(last)),
-        }
+        motion.apply_check(i, num_entries, height)
     }
-}
-
-#[derive(Debug, Clone)]
-pub enum Motion {
-    First,
-    Last,
-    Up,
-    Down,
-    PageUp,
-    PageDown,
-    HalfPageUp,
-    HalfPageDown,
-    Abs(usize),
-    Rel(isize),
 }

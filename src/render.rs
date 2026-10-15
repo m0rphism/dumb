@@ -13,7 +13,7 @@ use crossterm::{
 };
 
 use crate::{
-    SortBy, State,
+    DisplayMode, ErrorView, ErrorViewMode, SortBy, State,
     file_tree::{FileNode, FileState, FileTree},
     scan::Inode,
     theme::{Style, Theme, color_to_crossterm, interpolate_color},
@@ -97,8 +97,11 @@ pub fn render_state(stdout: &mut Stdout, state: &mut State, theme: &Theme) -> Re
         }
     };
 
-    render_header(&mut w, state, theme, &render_info)?;
-    render_file_tree(&mut w, state, theme, &render_info)?;
+    render_header(&mut w, &state, theme, &render_info)?;
+    match &state.display_mode {
+        DisplayMode::FileTree => render_file_tree(&mut w, state, theme, &render_info)?,
+        DisplayMode::ErrorView(error_view) => render_errors(&mut w, &state, theme, error_view)?,
+    };
 
     state.frame += 1;
 
@@ -115,12 +118,7 @@ pub struct RenderInfo {
     pub num_errors: usize,
 }
 
-fn render_header(
-    w: &mut impl Write,
-    state: &mut State,
-    theme: &Theme,
-    ri: &RenderInfo,
-) -> Result<()> {
+fn render_header(w: &mut impl Write, state: &State, theme: &Theme, ri: &RenderInfo) -> Result<()> {
     write!(w, "{}", cursor::MoveTo(0, 0))?;
     let style = &theme.header;
 
@@ -376,6 +374,110 @@ fn render_file_tree(
     }
 
     Ok(())
+}
+
+fn render_errors(
+    w: &mut impl Write,
+    state: &State,
+    theme: &Theme,
+    error_view: &ErrorView,
+) -> Result<()> {
+    let style = &theme.error_view;
+
+    let mut y = 2;
+    let width = state.term_size[0] as usize;
+    for (i, e) in error_view
+        .errors
+        .iter()
+        .enumerate()
+        .skip(error_view.cur_error_ix)
+    {
+        write!(w, "{}", cursor::MoveTo(0, y))?;
+        style.index.write_text(w, &(i + 1).to_string())?;
+        write!(w, "{}", cursor::MoveTo(4, y))?;
+        style.path.write_text(w, &e.path)?;
+        y += 1;
+        for l in wrap_lines(&e.message, width.saturating_sub(4).max(10)) {
+            write!(w, "{}", cursor::MoveTo(4, y))?;
+            style.message.write_text(w, &l)?;
+            y += 1;
+        }
+        y += 1;
+        if y > state.term_size[1] {
+            break;
+        }
+    }
+
+    Ok(())
+}
+
+/// Wraps `input` into lines that are at most `max_line_length` chars long.
+///
+/// Existing newlines in `input` are preserved. Any single input line longer
+/// than `max_line_length` is broken at a word boundary if possible, otherwise
+/// in the middle of a word. Continuation lines produced by breaking a single
+/// input line are indented by two spaces, and the indentation counts toward
+/// `max_line_length`.
+pub fn wrap_lines(input: &str, max_line_length: usize) -> Vec<String> {
+    assert!(
+        max_line_length > 0,
+        "max_line_length must be greater than 0"
+    );
+
+    let mut lines = Vec::new();
+    for line in input.split('\n') {
+        // Be lenient with CRLF input.
+        let line = line.strip_suffix('\r').unwrap_or(line);
+        wrap_single_line(line, max_line_length, &mut lines);
+    }
+    lines
+}
+
+fn wrap_single_line(line: &str, max_line_length: usize, lines: &mut Vec<String>) {
+    if line.trim().is_empty() {
+        lines.push(String::new());
+        return;
+    }
+
+    let indent = if max_line_length > 2 { "  " } else { "" };
+
+    let mut rest: Vec<char> = line.chars().collect();
+    let mut first = true;
+
+    while !rest.is_empty() {
+        let budget = max_line_length - (if first { 0 } else { indent.len() });
+
+        let mut cut = budget.min(rest.len());
+        if cut < rest.len() {
+            let mut boundary: Option<usize> = None;
+            let mut seen_content = false;
+            for (i, &c) in rest.iter().take(cut).enumerate() {
+                if c.is_whitespace() {
+                    if seen_content {
+                        boundary = Some(i);
+                    }
+                } else {
+                    seen_content = true;
+                }
+            }
+            if let Some(i) = boundary {
+                cut = i;
+            }
+        }
+
+        let segment: String = rest[..cut].iter().collect();
+        let segment = segment.trim_end();
+        lines.push(if first {
+            segment.to_string()
+        } else {
+            format!("{indent}{segment}")
+        });
+
+        rest = rest[cut..].to_vec();
+        let skipped = rest.iter().take_while(|c| c.is_whitespace()).count();
+        rest.drain(..skipped);
+        first = false;
+    }
 }
 
 pub fn loading_text(i: usize) -> &'static str {

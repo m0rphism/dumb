@@ -14,6 +14,8 @@ pub struct Theme {
     pub header: Header,
     #[serde_inline_default(FileTable::default())]
     pub file_table: FileTable,
+    #[serde_inline_default(ErrorView::default())]
+    pub error_view: ErrorView,
     #[serde_inline_default([0.2, 0.2, 0.2])]
     pub size_min_color: Color,
     #[serde_inline_default([1.0, 0.2, 0.2])]
@@ -100,6 +102,17 @@ pub struct FileTable {
     pub selected_row: Style,
 }
 
+#[serde_inline_default]
+#[derive(Clone, Debug, Deserialize)]
+pub struct ErrorView {
+    #[serde_inline_default(Style::default())]
+    pub index: Style,
+    #[serde_inline_default(Style::default().fg([1.0, 0.5, 0.5]).bold())]
+    pub path: Style,
+    #[serde_inline_default(Style::default().fg([0.8, 0.3, 0.3]))]
+    pub message: Style,
+}
+
 impl Default for Theme {
     fn default() -> Self {
         toml::from_str("").unwrap()
@@ -113,6 +126,12 @@ impl Default for Header {
 }
 
 impl Default for FileTable {
+    fn default() -> Self {
+        toml::from_str("").unwrap()
+    }
+}
+
+impl Default for ErrorView {
     fn default() -> Self {
         toml::from_str("").unwrap()
     }
