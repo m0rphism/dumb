@@ -216,41 +216,51 @@ fn handle_key_event(state: &mut State, key_event: KeyEvent) -> Option<bool> {
                     let children = sorted_entries(&file_tree, &state);
                     if let Some((name, _, _, _)) = children.get(state.cur_subdir_entry_ix()) {
                         let cur_path = state.cur_subdir.join(name);
+                        let errors: Vec<_> = file_tree
+                            .errors
+                            .iter()
+                            .filter(|(path, _)| path.strip_prefix(&cur_path).is_ok())
+                            .map(|(path, message)| ErrorInfo {
+                                path: path.to_string_lossy().to_string(),
+                                message: message.clone(),
+                            })
+                            .collect();
+                        if errors.len() > 0 {
+                            state.display_mode = DisplayMode::ErrorView(ErrorView {
+                                errors,
+                                mode: ErrorViewMode::CurEntryErrors,
+                                cur_error_ix: 0,
+                            });
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                }
+                KeyCode::Char('E') => {
+                    let errors: Vec<_> = state
+                        .file_tree
+                        .lock()
+                        .unwrap()
+                        .errors
+                        .iter()
+                        .map(|(path, message)| ErrorInfo {
+                            path: path.to_string_lossy().to_string(),
+                            message: message.clone(),
+                        })
+                        .collect();
+                    if errors.len() > 0 {
                         state.display_mode = DisplayMode::ErrorView(ErrorView {
-                            errors: file_tree
-                                .errors
-                                .iter()
-                                .filter(|(path, _)| path.strip_prefix(&cur_path).is_ok())
-                                .map(|(path, message)| ErrorInfo {
-                                    path: path.to_string_lossy().to_string(),
-                                    message: message.clone(),
-                                })
-                                .collect(),
-                            mode: ErrorViewMode::CurEntryErrors,
+                            errors,
+                            mode: ErrorViewMode::AllErrors,
                             cur_error_ix: 0,
                         });
                         true
                     } else {
                         false
                     }
-                }
-                KeyCode::Char('E') => {
-                    state.display_mode = DisplayMode::ErrorView(ErrorView {
-                        errors: state
-                            .file_tree
-                            .lock()
-                            .unwrap()
-                            .errors
-                            .iter()
-                            .map(|(path, message)| ErrorInfo {
-                                path: path.to_string_lossy().to_string(),
-                                message: message.clone(),
-                            })
-                            .collect(),
-                        mode: ErrorViewMode::AllErrors,
-                        cur_error_ix: 0,
-                    });
-                    true
                 }
                 _ => false,
             },
