@@ -15,8 +15,10 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use clap::Parser;
-use crossterm::event::{Event as TermEvent, KeyCode, KeyEventKind, KeyModifiers};
-use crossterm::terminal;
+use crossterm::{
+    event::{Event as TermEvent, KeyCode, KeyEventKind, KeyModifiers},
+    terminal,
+};
 
 use crate::{
     args::Args,
