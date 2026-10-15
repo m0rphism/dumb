@@ -13,7 +13,7 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::Parser;
 use crossterm::event::{Event as TermEvent, KeyCode, KeyEventKind};
 use crossterm::terminal;
@@ -62,15 +62,30 @@ fn main() {
         std::fs::write("dumb.log", &err_str).unwrap();
     }
 }
+
 fn run() -> Result<()> {
     let args = Args::parse();
 
-    let config_dir = dirs::config_dir().expect(
-        "The config directory could not be determined. Is your $HOME variable empty for some reason?"
-    ).join("dumb");
+    let (config_dir, config_path) = if let Some(config_path) = &args.config {
+        let config_path = config_path
+            .canonicalize()
+            .context("Failed to canonicalize config path '{config_path:?}'")?;
+        let config_dir = config_path.parent().expect(&format!(
+            "Config path '{config_path:?}' has no parent directory."
+        ));
+        if !config_path.exists() {
+            bail!("Config path '{config_path:?}' does not exist.")
+        }
+        (config_dir.to_path_buf(), config_path.clone())
+    } else {
+        let config_dir = dirs::config_dir().expect(
+            "The config directory could not be determined. Is your $HOME variable empty for some reason?"
+        ).join("dumb");
+        let config_path = config_dir.join("config.toml");
+        (config_dir, config_path)
+    };
 
     let config = {
-        let config_path = config_dir.join("config.toml");
         if !config_dir.exists() {
             Config::default()
         } else {
