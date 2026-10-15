@@ -12,6 +12,7 @@ use crate::scan::{Inode, InodeId, PathType, ScanEvent};
 pub struct FileTree {
     pub inodes: HashMap<InodeId, Inode>,
     pub root: FileNode,
+    pub errors: Vec<(PathBuf, String)>,
 }
 
 #[derive(Debug, Clone)]
@@ -109,6 +110,7 @@ impl FileTree {
         Self {
             inodes: HashMap::new(),
             root: FileNode::new(path.as_ref().metadata().unwrap().ino()),
+            errors: vec![],
         }
     }
 
@@ -137,12 +139,14 @@ impl FileTree {
             ScanEvent::NewInode(inode_id, inode) => {
                 self.inodes.insert(inode_id, inode);
             }
-            ScanEvent::FinishedScan(path, inode_id) => self.root.finish_file(
-                path,
-                *self.inodes.get(&inode_id).unwrap(),
-                &mut self.inodes,
-            ),
-            ScanEvent::FailedScan(path, err) => self.root.set_error(&path, err),
+            ScanEvent::FinishedScan(path, inode_id) => {
+                self.root
+                    .finish_file(path, *self.inodes.get(&inode_id).unwrap(), &mut self.inodes)
+            }
+            ScanEvent::FailedScan(path, err) => {
+                self.root.set_error(&path, err.clone());
+                self.errors.push((path, err));
+            }
         }
     }
 }

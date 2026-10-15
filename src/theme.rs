@@ -44,6 +44,9 @@ pub struct Header {
 
     #[serde_inline_default(Style::default().fg([0.4, 0.5, 1.0]))]
     pub sort_mode: Style,
+
+    #[serde_inline_default(Style::default().fg([1.0, 0.0, 0.0]))]
+    pub error: Style,
 }
 
 #[serde_inline_default]

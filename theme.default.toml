@@ -44,8 +44,11 @@ size_max_color = [1.0, 0.2, 0.2]
   size_total   = { fg = [0.4, 0.5, 1.0] }
   #size_percent = null
   
-  # Styles for the value after the `Sort by` label.
+  # Style for the value after the `Sort by` label.
   sort_mode = { fg = [0.4, 0.5, 1.0] }
+
+  # Style for the scan error count (only displayed if there are actually errors).
+  error = { fg = [1.0, 0.0, 0.0] }
 
 # Style of the fileview below the header line
 [file_table]

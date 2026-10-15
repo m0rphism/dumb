@@ -133,6 +133,20 @@ pub fn render_state(stdout: &mut Stdout, state: &mut State, theme: &Theme) -> Re
             .sort_mode
             .write_text(&mut w, &format!("{:?}", state.sort_by))?;
 
+        // Errors
+        if file_tree.errors.len() > 0 {
+            style.label.write_text(&mut w, ", ")?;
+            let error_string = if file_tree.errors.len() == 1 {
+                "error"
+            } else {
+                "errors"
+            };
+            style.error.write_text(
+                &mut w,
+                &format!("{} {}", file_tree.errors.len(), error_string),
+            )?;
+        }
+
         // Progress State
         let is_scan_done = match target_dir_state {
             FileState::Queued | FileState::InProgress => {
