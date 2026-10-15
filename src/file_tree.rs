@@ -20,6 +20,7 @@ pub struct FileNode {
     pub children: HashMap<OsString, FileNode>,
     pub inode_id: InodeId,
     pub state: FileState,
+    pub num_child_errors: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -36,6 +37,7 @@ impl FileNode {
             children: HashMap::new(),
             state: FileState::Queued,
             inode_id,
+            num_child_errors: 0,
         }
     }
 
@@ -73,7 +75,13 @@ impl FileNode {
     }
 
     pub fn set_error(&mut self, path: &Path, error: String) {
-        self.get_mut(path).unwrap().state = FileState::Failed(error);
+        let mut node = self;
+        for c in path.components() {
+            let c = &c.as_os_str().to_os_string();
+            node.num_child_errors += 1;
+            node = node.children.get_mut(c).unwrap();
+        }
+        node.state = FileState::Failed(error);
     }
 
     pub fn finish_file(

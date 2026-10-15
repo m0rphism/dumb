@@ -100,6 +100,12 @@ pub struct FileTable {
 
     #[serde_inline_default(Style::default().bg([0.1, 0.1, 0.1]))]
     pub selected_row: Style,
+
+    #[serde_inline_default(Style::default().fg([1.0, 0.2, 0.2]).bg([0.2, 0.0, 0.0]))]
+    pub error_row: Style,
+
+    #[serde_inline_default(Style::default().fg([1.0, 0.4, 0.4]).bg([0.4, 0.0, 0.0]))]
+    pub selected_error_row: Style,
 }
 
 #[serde_inline_default]
@@ -186,8 +192,8 @@ impl Style {
     }
     pub fn merge(&self, other: &Self) -> Self {
         Self {
-            fg: self.fg.or(other.fg),
-            bg: self.bg.or(other.bg),
+            fg: other.fg.or(self.fg),
+            bg: other.bg.or(self.bg),
             bold: other.bold,
             italic: other.italic,
             underlined: other.underlined,

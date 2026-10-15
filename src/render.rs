@@ -258,15 +258,16 @@ fn render_file_tree(
         let is_selected = i == state.cur_subdir_entry_ix();
         let mut x = 0;
 
-        let maybe_selected = |s: &Style| {
-            if is_selected {
-                s.merge(&style.selected_row)
-            } else {
-                s.clone()
-            }
+        let has_error = node.num_child_errors > 0 || matches!(node.state, FileState::Failed(_));
+
+        let style_mod = |s: &Style| match (is_selected, has_error) {
+            (true, true) => s.merge(&style.selected_error_row),
+            (true, false) => s.merge(&style.selected_row),
+            (false, true) => s.merge(&style.error_row),
+            (false, false) => s.clone(),
         };
 
-        let bg_style = maybe_selected(&Style::default());
+        let bg_style = style_mod(&Style::default());
 
         // State
         if !is_scan_done {
@@ -275,7 +276,7 @@ fn render_file_tree(
                 FileState::Finished => " ",
                 FileState::Failed(_) => "E",
             };
-            maybe_selected(&style.progress_value).write_text(w, state_str)?;
+            style_mod(&style.progress_value).write_text(w, state_str)?;
             bg_style.write_text(w, "  ")?;
             x += 3;
         }
@@ -294,11 +295,11 @@ fn render_file_tree(
         } else {
             &style.name_file_value
         };
-        maybe_selected(s).write_text(w, &name)?;
+        style_mod(s).write_text(w, &name)?;
         x += name_col_width;
 
         // Make sure background color is printed even if name is shorter than max length.
-        if is_selected {
+        if is_selected || has_error {
             let spaces: String = (name.chars().count()..name_col_width as usize)
                 .map(|_| " ")
                 .collect();
@@ -312,7 +313,7 @@ fn render_file_tree(
         let size_abs_str = bytes_to_str(inode.size_in_bytes);
         let spaces: String = (size_abs_str.len()..10).map(|_| " ").collect();
         bg_style.write_text(w, &spaces)?;
-        maybe_selected(&style.size_abs_value).write_text(w, &size_abs_str)?;
+        style_mod(&style.size_abs_value).write_text(w, &size_abs_str)?;
         bg_style.write_text(w, "  ")?;
 
         // Size Rel
@@ -321,12 +322,13 @@ fn render_file_tree(
         let spaces: String = (abs_size_percent_str.len()..10).map(|_| " ").collect();
         bg_style.write_text(w, &spaces)?;
         if let Some(s) = &style.size_rel_value {
-            s.write(w)?;
+            style_mod(s).write(w)?;
         } else {
-            bg_style
-                .clone()
-                .fg(percent_to_color(abs_size_percent, theme))
-                .write(w)?;
+            let mut s = bg_style.clone();
+            if !has_error {
+                s = s.fg(percent_to_color(abs_size_percent, theme));
+            }
+            s.write(w)?;
         }
         write!(w, "{}", abs_size_percent_str)?;
         write!(w, "{}", style::ResetColor)?;
@@ -356,12 +358,12 @@ fn render_file_tree(
         let s_val = format!(
             "{}{}",
             ResetColor,
-            maybe_selected(&style.modtime_value).to_string()
+            style_mod(&style.modtime_value).to_string()
         );
         let s_delim = format!(
             "{}{}",
             ResetColor,
-            maybe_selected(&style.modtime_delim).to_string()
+            style_mod(&style.modtime_delim).to_string()
         );
         let last_modified = last_modified
             .format("%Y[-]%m[-]%d %H[:]%M[:]%S")
