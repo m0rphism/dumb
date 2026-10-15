@@ -8,7 +8,7 @@ pub mod theme;
 
 use std::{
     io::stdout,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex, mpsc::channel},
     time::Duration,
 };
@@ -116,52 +116,7 @@ fn main() {
 fn run() -> Result<()> {
     let args = Args::parse();
 
-    let (config_dir, config_path) = if let Some(config_path) = &args.config {
-        let config_path = config_path
-            .canonicalize()
-            .context("Failed to canonicalize config path '{config_path:?}'")?;
-        let config_dir = config_path.parent().expect(&format!(
-            "Config path '{config_path:?}' has no parent directory."
-        ));
-        if !config_path.exists() {
-            bail!("Config path '{config_path:?}' does not exist.")
-        }
-        (config_dir.to_path_buf(), config_path.clone())
-    } else {
-        let config_dir = dirs::config_dir().expect(
-            "The config directory could not be determined. Is your $HOME variable empty for some reason?"
-        ).join("dumb");
-        let config_path = config_dir.join("config.toml");
-        (config_dir, config_path)
-    };
-
-    let config = {
-        if !config_dir.exists() {
-            Config::default()
-        } else {
-            let content = std::fs::read_to_string(&config_path)
-                .context(format!("Couldn't read config file at {config_path:?}."))?;
-            toml::from_str(&content)
-                .context(format!("Failed to parse config file at {config_path:?}."))?
-        }
-    };
-
-    let theme = {
-        match config.theme {
-            None => Theme::default(),
-            Some(theme_path) => {
-                let theme_path = if theme_path.is_relative() {
-                    config_dir.join(theme_path)
-                } else {
-                    theme_path.clone()
-                };
-                let content = std::fs::read_to_string(&theme_path)
-                    .context(format!("Couldn't read theme file at {theme_path:?}."))?;
-                toml::from_str(&content)
-                    .context(format!("Failed to parse theme file at {theme_path:?}."))?
-            }
-        }
-    };
+    let (config, theme) = load_config_and_theme(&args.config)?;
 
     let target_path = args
         .target
@@ -331,4 +286,55 @@ fn run() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn load_config_and_theme(config_path: &Option<PathBuf>) -> Result<(Config, Theme)> {
+    let (config_dir, config_path) = if let Some(config_path) = config_path {
+        let config_path = config_path
+            .canonicalize()
+            .context("Failed to canonicalize config path '{config_path:?}'")?;
+        let config_dir = config_path.parent().expect(&format!(
+            "Config path '{config_path:?}' has no parent directory."
+        ));
+        if !config_path.exists() {
+            bail!("Config path '{config_path:?}' does not exist.")
+        }
+        (config_dir.to_path_buf(), config_path.clone())
+    } else {
+        let config_dir = dirs::config_dir().expect(
+            "The config directory could not be determined. Is your $HOME variable empty for some reason?"
+        ).join("dumb");
+        let config_path = config_dir.join("config.toml");
+        (config_dir, config_path)
+    };
+
+    let config = {
+        if !config_dir.exists() {
+            Config::default()
+        } else {
+            let content = std::fs::read_to_string(&config_path)
+                .context(format!("Couldn't read config file at {config_path:?}."))?;
+            toml::from_str(&content)
+                .context(format!("Failed to parse config file at {config_path:?}."))?
+        }
+    };
+
+    let theme = {
+        match &config.theme {
+            None => Theme::default(),
+            Some(theme_path) => {
+                let theme_path = if theme_path.is_relative() {
+                    config_dir.join(theme_path)
+                } else {
+                    theme_path.clone()
+                };
+                let content = std::fs::read_to_string(&theme_path)
+                    .context(format!("Couldn't read theme file at {theme_path:?}."))?;
+                toml::from_str(&content)
+                    .context(format!("Failed to parse theme file at {theme_path:?}."))?
+            }
+        }
+    };
+
+    Ok((config, theme))
 }
