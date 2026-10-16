@@ -9,8 +9,10 @@ pub mod scan;
 pub mod theme;
 
 use std::{
+    ffi::OsString,
     io::stdout,
-    path::PathBuf,
+    os::unix::fs::MetadataExt,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex, mpsc::channel},
     time::Duration,
 };
@@ -24,13 +26,13 @@ use crossterm::{
 
 use crate::{
     args::Args,
-    config::{Config, HeaderLayout, SortBy},
+    config::{Config, HeaderLayout, SizeMetric, SortBy},
     file_tree::FileTree,
     help::{HELP, HelpMeta},
     motion::Motion,
     raw_mode::RawMode,
     render::{render_state, sorted_entries},
-    scan::scan,
+    scan::{Inode, scan},
     theme::Theme,
 };
 
@@ -61,13 +63,21 @@ fn run() -> Result<()> {
         let file_tree = file_tree.clone();
         let target_path = target_path.clone();
         move || -> Result<()> {
-            scan(&target_path, |mut scan_event| -> Result<()> {
-                let mut file_tree = file_tree.lock().unwrap();
-                scan_event
-                    .map_path_bufs(|p| *p = p.strip_prefix(&target_path).unwrap().to_path_buf());
-                file_tree.handle_scan_event(scan_event);
-                Ok(())
-            })?;
+            scan(
+                &target_path,
+                |mut scan_event| -> Result<()> {
+                    let mut file_tree = file_tree.lock().unwrap();
+                    scan_event.map_path_bufs(|p| {
+                        *p = p.strip_prefix(&target_path).unwrap().to_path_buf()
+                    });
+                    file_tree.handle_scan_event(scan_event);
+                    Ok(())
+                },
+                |p: &Path| {
+                    let rel = p.strip_prefix(&target_path).unwrap_or(p);
+                    file_tree.lock().unwrap().is_deleted_path(rel)
+                },
+            )?;
             done_sender.send(())?;
             Ok(())
         }
@@ -117,9 +127,11 @@ fn run() -> Result<()> {
         frame: 0,
         sort_by: config.default_sort_mode,
         header_layout: config.default_header_layout,
+        size_metric: config.default_size_metric,
         sort_dirs_before_files: true,
         display_mode: DisplayMode::FileTree,
         help_meta: HelpMeta::new(),
+        status: None,
     };
 
     let mut stdout = stdout();
@@ -130,7 +142,8 @@ fn run() -> Result<()> {
         // println!("Received: {event:?}");
         let redraw = match event {
             Event::Term(event) => match event {
-                TermEvent::Key(key_event) => match handle_key_event(&mut state, key_event) {
+                TermEvent::Key(key_event) => match handle_key_event(&mut state, &config, key_event)
+                {
                     Some(redraw) => redraw,
                     None => break,
                 },
@@ -155,8 +168,11 @@ fn run() -> Result<()> {
 }
 
 /// Returns `None` if the program should quit, or `Some(should_redraw)`.
-fn handle_key_event(state: &mut State, key_event: KeyEvent) -> Option<bool> {
+fn handle_key_event(state: &mut State, config: &Config, key_event: KeyEvent) -> Option<bool> {
     let redraw = if key_event.kind != KeyEventKind::Release {
+        // Any key press clears the status message.
+        state.status = None;
+
         let h = state.term_size[1];
         match &mut state.display_mode {
             DisplayMode::FileTree => match key_event.code {
@@ -179,8 +195,9 @@ fn handle_key_event(state: &mut State, key_event: KeyEvent) -> Option<bool> {
                     let redraw = {
                         let ix = state.cur_subdir_entry_ix();
                         let file_tree = state.file_tree.lock().unwrap();
-                        let entries = sorted_entries(&file_tree, &state);
-                        if let Some((cur_name, _node, _inode, _is_dir @ true)) = entries.get(ix) {
+                        let entries = sorted_entries(&file_tree, state);
+                        if let Some((cur_name, _node, _inode, _is_dir @ true, _)) = entries.get(ix)
+                        {
                             state.cur_subdir = state.cur_subdir.join(cur_name);
                             true
                         } else {
@@ -220,10 +237,14 @@ fn handle_key_event(state: &mut State, key_event: KeyEvent) -> Option<bool> {
                     state.header_layout = state.header_layout.next();
                     true
                 }
+                KeyCode::Char('m') => {
+                    state.size_metric = state.size_metric.next();
+                    true
+                }
                 KeyCode::Char('e') => {
                     let file_tree = state.file_tree.lock().unwrap();
-                    let children = sorted_entries(&file_tree, &state);
-                    if let Some((name, _, _, _)) = children.get(state.cur_subdir_entry_ix()) {
+                    let children = sorted_entries(&file_tree, state);
+                    if let Some((name, _, _, _, _)) = children.get(state.cur_subdir_entry_ix()) {
                         let cur_path = state.cur_subdir.join(name);
                         let errors: Vec<_> = file_tree
                             .errors
@@ -234,7 +255,7 @@ fn handle_key_event(state: &mut State, key_event: KeyEvent) -> Option<bool> {
                                 message: message.clone(),
                             })
                             .collect();
-                        if errors.len() > 0 {
+                        if !errors.is_empty() {
                             state.display_mode = DisplayMode::ErrorView(ErrorView {
                                 errors,
                                 mode: ErrorViewMode::CurEntryErrors,
@@ -260,7 +281,7 @@ fn handle_key_event(state: &mut State, key_event: KeyEvent) -> Option<bool> {
                             message: message.clone(),
                         })
                         .collect();
-                    if errors.len() > 0 {
+                    if !errors.is_empty() {
                         state.display_mode = DisplayMode::ErrorView(ErrorView {
                             errors,
                             mode: ErrorViewMode::AllErrors,
@@ -271,12 +292,30 @@ fn handle_key_event(state: &mut State, key_event: KeyEvent) -> Option<bool> {
                         false
                     }
                 }
+                KeyCode::Char('d') if config.enable_delete_binding => {
+                    if let Some(rel) = state.cur_entry_path() {
+                        if config.require_delete_confirmation {
+                            state.display_mode = DisplayMode::DeleteDialog(rel);
+                        } else {
+                            state.try_delete(&rel);
+                        }
+                    }
+                    true
+                }
                 KeyCode::Char('?') => {
                     state.display_mode = DisplayMode::HelpView(HelpView::default());
                     true
                 }
                 _ => false,
             },
+            DisplayMode::DeleteDialog(target) => {
+                let target = target.clone();
+                state.display_mode = DisplayMode::FileTree;
+                if let KeyCode::Char('y' | 'Y') = key_event.code {
+                    state.try_delete(&target);
+                }
+                true
+            }
             DisplayMode::ErrorView(error_view) => match key_event.code {
                 KeyCode::Char('q') | KeyCode::Char('e') | KeyCode::Char('E') => {
                     state.display_mode = DisplayMode::FileTree;
@@ -328,10 +367,6 @@ fn handle_key_event(state: &mut State, key_event: KeyEvent) -> Option<bool> {
                 }
                 KeyCode::Char('u') if key_event.modifiers == KeyModifiers::CONTROL => {
                     help_view.apply_motion(Motion::HalfPageUp, h)
-                }
-                KeyCode::Char('?') => {
-                    state.display_mode = DisplayMode::FileTree;
-                    true
                 }
                 _ => false,
             },
@@ -404,6 +439,8 @@ pub enum DisplayMode {
     FileTree,
     ErrorView(ErrorView),
     HelpView(HelpView),
+    /// Target-relative path of the entry to delete.
+    DeleteDialog(PathBuf),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -451,10 +488,12 @@ pub struct State {
     pub term_size: [u16; 2],
     pub frame: usize,
     pub sort_by: SortBy,
+    pub size_metric: SizeMetric,
     pub sort_dirs_before_files: bool,
     pub display_mode: DisplayMode,
     pub help_meta: HelpMeta,
     pub header_layout: HeaderLayout,
+    pub status: Option<String>,
 }
 
 impl State {
@@ -479,5 +518,59 @@ impl State {
         let height = self.term_size[1] as usize - 3;
         let i = self.cur_subdir_entry_ix_mut();
         motion.apply_check(i, num_entries, height)
+    }
+
+    pub fn cur_entry(&self) -> Option<(OsString, Inode)> {
+        let ix = self.cur_subdir_entry_ix();
+        let file_tree = self.file_tree.lock().unwrap();
+        sorted_entries(&file_tree, self)
+            .into_iter()
+            .nth(ix)
+            .map(|(name, _, inode, _, _)| (name.clone(), inode))
+    }
+
+    /// Target-relative path of the currently selected entry.
+    pub fn cur_entry_path(&self) -> Option<PathBuf> {
+        let (name, _) = self.cur_entry()?;
+        Some(self.cur_subdir.join(&name))
+    }
+
+    pub fn try_delete(&mut self, rel: &Path) {
+        let target = self.target_path.clone();
+        let abs = target.join(rel);
+        if let Err(e) = remove_file_or_dir(&abs) {
+            self.status = Some(format!("Failed to delete {abs:?}: {e}"));
+            return;
+        }
+        let stat_nlink = |p: &Path| {
+            std::fs::symlink_metadata(target.join(p))
+                .ok()
+                .map(|m| m.nlink())
+        };
+        let mut tree = self.file_tree.lock().unwrap();
+        if tree.delete_path(rel, &stat_nlink).is_none() {
+            drop(tree);
+            self.status = Some(format!(
+                "Failed to delete {abs:?}: entry not found in file tree."
+            ));
+            return;
+        }
+        drop(tree);
+
+        // Make sure that the selection index of the entry list is still in bounds.
+        // This might not be the case if the last entry was deleted.
+        let len = self.cur_subdir_entry_len();
+        let ix = self.cur_subdir_entry_ix_mut();
+        if *ix >= len {
+            *ix = len.saturating_sub(1);
+        }
+    }
+}
+
+pub fn remove_file_or_dir(p: &Path) -> Result<(), std::io::Error> {
+    if p.is_dir() {
+        std::fs::remove_dir_all(p)
+    } else {
+        std::fs::remove_file(p)
     }
 }

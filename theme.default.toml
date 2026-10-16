@@ -47,6 +47,9 @@ size_max_color = [1.0, 0.2, 0.2]
   # Style for the value after the `Sort by` label.
   sort_mode = { fg = [0.4, 0.5, 1.0] }
 
+  # Style for the size metric indicator (e.g. `[freed]`) displayed after the size.
+  size_metric = { fg = [0.4, 0.5, 1.0] }
+
   # Style for the scan error count (only displayed if there are actually errors).
   error = { fg = [1.0, 0.0, 0.0] }
 
@@ -65,8 +68,9 @@ size_max_color = [1.0, 0.2, 0.2]
   modtime_header  = { bold = true }
   
   # Styles for the non-header cells of the file table:
-  # - Cells in the `Name` column can use different styles depending on whether the name refers to a
-  #   file (`name_file_value`) or a directory (`name_dir_value`).
+  # - Cells in the `Name` column can use different styles depending on whether
+  #   the name refers to a file (`name_file_value`), a directory
+  #   (`name_dir_value`), or a file with multiple links (`name_hardlink_value`).
   # - Relative sizes (`size_rel_value`, `size_cur_value`) default to using a
   #   color between `size_min_color` and `size_max_color` depending on
   #   percentage.
@@ -76,6 +80,7 @@ size_max_color = [1.0, 0.2, 0.2]
   progress_value  = {}
   name_file_value = {}
   name_dir_value  = { fg = [0.7, 0.7, 0.7] }
+  name_hardlink_value = { fg = [0.9, 0.9, 0.6] }
   size_abs_value  = {}
   #size_rel_value  = null
   #size_cur_value  = null
@@ -120,3 +125,12 @@ size_max_color = [1.0, 0.2, 0.2]
   keys   = { fg = [0.8, 0.5, 0.8] }
   action = { fg = [0.8, 0.8, 0.5] }
   scope  = { fg = [0.5, 0.8, 0.8] }
+
+# Style of the confirmation dialog that is displayed when the user tries to delete a file.
+[delete_dialog]
+
+  # The path that should be deleted.
+  path        = { fg = [0.4, 0.5, 1.0] }
+
+  # The rest of the dialog message.
+  message     = {}

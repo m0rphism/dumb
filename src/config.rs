@@ -17,6 +17,15 @@ pub struct Config {
 
     #[serde_inline_default(SortBy::Size)]
     pub default_sort_mode: SortBy,
+
+    #[serde_inline_default(SizeMetric::Freed)]
+    pub default_size_metric: SizeMetric,
+
+    #[serde_inline_default(true)]
+    pub enable_delete_binding: bool,
+
+    #[serde_inline_default(true)]
+    pub require_delete_confirmation: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
@@ -49,6 +58,36 @@ impl SortBy {
             SortBy::Size => SortBy::Name,
             SortBy::Name => SortBy::ModTime,
             SortBy::ModTime => SortBy::Size,
+        }
+    }
+}
+
+/// The size metric used to display and sort entries. Sizes are disk usage
+/// in bytes (allocated blocks, as in `du(1)`), not apparent file sizes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SizeMetric {
+    /// The space that would be freed by recursively deleting the entry.
+    /// A hard-linked file is counted exactly once, at the deepest directory
+    /// that contains all of its names.
+    Freed,
+    /// Naive counting: every entry counts its full size at its own parent,
+    /// so a hard-linked file is counted once per link.
+    Naive,
+}
+
+impl SizeMetric {
+    pub fn next(self) -> Self {
+        match self {
+            SizeMetric::Freed => SizeMetric::Naive,
+            SizeMetric::Naive => SizeMetric::Freed,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SizeMetric::Freed => "freed",
+            SizeMetric::Naive => "naive",
         }
     }
 }

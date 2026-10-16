@@ -1,7 +1,7 @@
 use std::{
     ffi::OsString,
     io::{Stdout, Write},
-    path::PathBuf,
+    path::Path,
 };
 
 use anyhow::Result;
@@ -13,8 +13,8 @@ use crossterm::{
 };
 
 use crate::{
-    DisplayMode, ErrorView, ErrorViewMode, HelpView, SortBy, State,
-    config::{Config, HeaderLayout},
+    DisplayMode, ErrorView, HelpView, SortBy, State,
+    config::{HeaderLayout, SizeMetric},
     file_tree::{FileNode, FileState, FileTree},
     help::HELP,
     scan::Inode,
@@ -32,7 +32,7 @@ pub fn rgb(r: f32, g: f32, b: f32) -> Color {
 pub fn sorted_entries<'a>(
     file_tree: &'a FileTree,
     state: &State,
-) -> Vec<(&'a OsString, &'a FileNode, Inode, bool)> {
+) -> Vec<(&'a OsString, &'a FileNode, Inode, bool, u64)> {
     let children = &file_tree.get(&state.cur_subdir).unwrap().children;
     let mut children = children
         .iter()
@@ -40,26 +40,44 @@ pub fn sorted_entries<'a>(
             let path = state.target_path.join(&state.cur_subdir).join(name);
             let is_dir = path.is_dir() && !path.is_symlink();
             let inode = *file_tree.inodes.get(&node.inode_id).unwrap();
-            (name, node, inode, is_dir)
+            let size = match state.size_metric {
+                SizeMetric::Naive => {
+                    if inode.is_dir {
+                        node.naive_size
+                    } else {
+                        inode.allocated_bytes
+                    }
+                }
+                SizeMetric::Freed => {
+                    if inode.is_dir {
+                        node.freed_size
+                    } else if inode.num_hardlinks == 1 {
+                        inode.allocated_bytes
+                    } else {
+                        0
+                    }
+                }
+            };
+            (name, node, inode, is_dir, size)
         })
         .collect::<Vec<_>>();
     match state.sort_by {
         SortBy::Name => {
-            children.sort_by_key(|(name, _node, _inode, is_dir)| {
+            children.sort_by_key(|(name, _node, _inode, is_dir, _size)| {
                 let is_file = !*is_dir && state.sort_dirs_before_files;
                 (is_file, *name)
             });
         }
         SortBy::Size => {
             children.sort_by(
-                |(name1, _node1, inode1, _is_dir1), (name2, _node2, inode2, _is_dir2)| {
-                    (inode2.size_in_bytes, *name1).cmp(&(inode1.size_in_bytes, *name2))
+                |(name1, _node1, _inode1, _dir1, size1), (name2, _node2, _inode2, _dir2, size2)| {
+                    (size2, *name1).cmp(&(size1, *name2))
                 },
             );
         }
         SortBy::ModTime => {
             children.sort_by(
-                |(name1, _node1, inode1, _is_dir1), (name2, _node2, inode2, _is_dir2)| {
+                |(name1, _node1, inode1, _dir1, _size1), (name2, _node2, inode2, _dir2, _size2)| {
                     (inode2.last_modified, *name1).cmp(&(inode1.last_modified, *name2))
                 },
             );
@@ -78,37 +96,50 @@ pub fn render_state(stdout: &mut Stdout, state: &mut State, theme: &Theme) -> Re
 
     let render_info = {
         let file_tree = state.file_tree.lock().unwrap();
+        let size_of = |n: &FileNode| match state.size_metric {
+            SizeMetric::Freed => n.freed_size,
+            SizeMetric::Naive => n.naive_size,
+        };
         RenderInfo {
-            cur_dir_size: file_tree
-                .get(&state.cur_subdir)
-                .and_then(|n| file_tree.inodes.get(&n.inode_id).map(|n| n.size_in_bytes))
-                .unwrap_or(0),
-            target_dir_size: file_tree
-                .get(&PathBuf::from(""))
-                .and_then(|n| file_tree.inodes.get(&n.inode_id).map(|n| n.size_in_bytes))
-                .unwrap_or(0),
-            target_dir_state: file_tree
-                .get(&PathBuf::from(""))
-                .as_ref()
-                .unwrap()
-                .state
-                .clone(),
+            cur_dir_size: file_tree.get(&state.cur_subdir).map(size_of).unwrap_or(0),
+            target_dir_size: size_of(&file_tree.root),
+            target_dir_state: file_tree.root.state.clone(),
             num_errors: file_tree.errors.len(),
         }
     };
 
-    let header_height = render_header(&mut w, &state, theme, &render_info)?;
+    let header_height = render_header(&mut w, state, theme, &render_info)?;
     match &state.display_mode {
         DisplayMode::FileTree => {
             render_file_tree(&mut w, state, theme, &render_info, header_height + 1)?
         }
         DisplayMode::ErrorView(error_view) => {
-            render_errors(&mut w, &state, theme, error_view, header_height + 1)?
+            render_errors(&mut w, state, theme, error_view, header_height + 1)?
         }
         DisplayMode::HelpView(help_view) => {
-            render_help_view(&mut w, &state, theme, help_view, header_height + 1)?
+            render_help_view(&mut w, state, theme, help_view, header_height + 1)?
+        }
+        DisplayMode::DeleteDialog(target) => {
+            render_delete_dialog(
+                &mut w,
+                theme,
+                header_height + 1,
+                &state.target_path.join(target),
+            )?;
         }
     };
+
+    // Transient status message (e.g. a failed deletion) on the bottom line.
+    if let Some(msg) = &state.status {
+        let width = state.term_size[0].saturating_sub(1) as usize;
+        let msg: String = msg.chars().take(width).collect();
+        write!(
+            w,
+            "{}",
+            cursor::MoveTo(0, state.term_size[1].saturating_sub(1))
+        )?;
+        theme.header.error.write_text(&mut w, &msg)?;
+    }
 
     state.frame += 1;
 
@@ -185,6 +216,13 @@ fn render_header<W: Write>(
         }
         style.label.write_text(w, ")")?;
     }
+    // The active size metric, e.g. ` [freed]`: the brackets use the label
+    // style, the metric itself the size_metric style.
+    style.label.write_text(w, " [")?;
+    style
+        .size_metric
+        .write_text(w, state.size_metric.as_str())?;
+    style.label.write_text(w, "]")?;
     next_field(&mut y, w)?;
 
     // Sort Mode
@@ -218,13 +256,10 @@ fn render_header<W: Write>(
     }
 
     // Spinner
-    match &ri.target_dir_state {
-        FileState::Queued | FileState::InProgress => {
-            next_field(&mut y, w)?;
-            style.spinner.write(w)?;
-            write!(w, "{}", loading_text(state.frame))?;
-        }
-        _ => (),
+    if matches!(ri.target_dir_state, FileState::Queued) {
+        next_field(&mut y, w)?;
+        style.spinner.write(w)?;
+        write!(w, "{}", loading_text(state.frame))?;
     }
 
     Ok(y + 1)
@@ -238,7 +273,7 @@ fn render_file_tree(
     mut y: u16,
 ) -> Result<()> {
     let is_scan_done = match ri.target_dir_state {
-        FileState::Queued | FileState::InProgress => false,
+        FileState::Queued => false,
         FileState::Finished | FileState::Failed(_) => true,
     };
 
@@ -286,7 +321,8 @@ fn render_file_tree(
         0,
         state.cur_subdir_entry_ix() as i64 - ((state.term_size[1] as i64 - y as i64) / 2),
     ) as usize;
-    for (j, (i, (name, node, inode, is_dir))) in children.iter().enumerate().skip(skip).enumerate()
+    for (j, (i, (name, node, inode, is_dir, size))) in
+        children.iter().enumerate().skip(skip).enumerate()
     {
         if y as usize + j >= state.term_size[1] as usize {
             break;
@@ -310,7 +346,7 @@ fn render_file_tree(
         // State
         if !is_scan_done {
             let state_str = match node.state {
-                FileState::Queued | FileState::InProgress => "…",
+                FileState::Queued => "…",
                 FileState::Finished => " ",
                 FileState::Failed(_) => "E",
             };
@@ -330,6 +366,8 @@ fn render_file_tree(
         }
         let s = if inode.is_dir {
             &style.name_dir_value
+        } else if inode.num_hardlinks > 1 {
+            &style.name_hardlink_value
         } else {
             &style.name_file_value
         };
@@ -348,14 +386,14 @@ fn render_file_tree(
         bg_style.write_text(w, "  ")?;
 
         // Size Abs
-        let size_abs_str = bytes_to_str(inode.size_in_bytes);
+        let size_abs_str = bytes_to_str(*size);
         let spaces: String = (size_abs_str.len()..10).map(|_| " ").collect();
         bg_style.write_text(w, &spaces)?;
         style_mod(&style.size_abs_value).write_text(w, &size_abs_str)?;
         bg_style.write_text(w, "  ")?;
 
         // Size Rel
-        let abs_size_percent = (inode.size_in_bytes as f64 / ri.target_dir_size as f64) * 100.0;
+        let abs_size_percent = (*size as f64 / ri.target_dir_size as f64) * 100.0;
         let abs_size_percent_str = format!("{:6.2} %", abs_size_percent);
         let spaces: String = (abs_size_percent_str.len()..10).map(|_| " ").collect();
         bg_style.write_text(w, &spaces)?;
@@ -374,7 +412,7 @@ fn render_file_tree(
 
         // Size Cur
         if !state.cur_subdir.to_string_lossy().is_empty() {
-            let size_percent = (inode.size_in_bytes as f64 / ri.cur_dir_size as f64) * 100.0;
+            let size_percent = (*size as f64 / ri.cur_dir_size as f64) * 100.0;
             let size_percent_str = format!("{:6.2} %", size_percent);
             let spaces: String = (abs_size_percent_str.len()..10).map(|_| " ").collect();
             bg_style.write_text(w, &spaces)?;
@@ -396,12 +434,12 @@ fn render_file_tree(
         let s_val = format!(
             "{}{}",
             ResetColor,
-            style_mod(&style.modtime_value).to_string()
+            style_mod(&style.modtime_value)
         );
         let s_delim = format!(
             "{}{}",
             ResetColor,
-            style_mod(&style.modtime_delim).to_string()
+            style_mod(&style.modtime_delim)
         );
         let last_modified = last_modified
             .format("%Y[-]%m[-]%d %H[:]%M[:]%S")
@@ -412,6 +450,25 @@ fn render_file_tree(
         write!(w, "{}", last_modified)?;
         write!(w, "{}", style::ResetColor)?;
     }
+
+    Ok(())
+}
+
+fn render_delete_dialog(
+    w: &mut impl Write,
+    theme: &Theme,
+    y: u16,
+    path_to_delete: &Path,
+) -> Result<()> {
+    let style = &theme.delete_dialog;
+    write!(w, "{}", cursor::MoveTo(0, y))?;
+    style
+        .message
+        .write_text(w, "Delete the following file/directory?  [y/n]")?;
+    write!(w, "{}", cursor::MoveTo(2, y + 2))?;
+    style
+        .path
+        .write_text(w, path_to_delete.to_string_lossy().as_ref())?;
 
     Ok(())
 }

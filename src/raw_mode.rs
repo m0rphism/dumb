@@ -1,13 +1,12 @@
-use std::io::{stdout, Write};
+use std::io::{Write, stdout};
 
 use anyhow::Result;
 use crossterm::{
-    cursor,
+    QueueableCommand, cursor,
     terminal::{
-        disable_raw_mode, enable_raw_mode, DisableLineWrap, EnableLineWrap, EnterAlternateScreen,
-        LeaveAlternateScreen,
+        DisableLineWrap, EnableLineWrap, EnterAlternateScreen, LeaveAlternateScreen,
+        disable_raw_mode, enable_raw_mode,
     },
-    QueueableCommand,
 };
 
 pub struct RawMode {}

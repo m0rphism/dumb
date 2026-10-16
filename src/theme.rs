@@ -18,6 +18,8 @@ pub struct Theme {
     pub error_view: ErrorView,
     #[serde_inline_default(HelpView::default())]
     pub help_view: HelpView,
+    #[serde_inline_default(DeleteDialog::default())]
+    pub delete_dialog: DeleteDialog,
     #[serde_inline_default([0.2, 0.2, 0.2])]
     pub size_min_color: Color,
     #[serde_inline_default([1.0, 0.2, 0.2])]
@@ -48,6 +50,11 @@ pub struct Header {
 
     #[serde_inline_default(Style::default().fg([0.4, 0.5, 1.0]))]
     pub sort_mode: Style,
+
+    /// Style of the size metric indicator (e.g. `[freed]`) displayed after
+    /// the size.
+    #[serde_inline_default(Style::default().fg([0.4, 0.5, 1.0]))]
+    pub size_metric: Style,
 
     #[serde_inline_default(Style::default().fg([1.0, 0.0, 0.0]))]
     pub error: Style,
@@ -85,6 +92,9 @@ pub struct FileTable {
 
     #[serde_inline_default(Style::default().fg([0.7, 0.7, 0.7]))]
     pub name_dir_value: Style,
+
+    #[serde_inline_default(Style::default().fg([0.9, 0.9, 0.6]))]
+    pub name_hardlink_value: Style,
 
     #[serde_inline_default(Style::default())]
     pub size_abs_value: Style,
@@ -142,6 +152,15 @@ pub struct HelpView {
     pub scope: Style,
 }
 
+#[serde_inline_default]
+#[derive(Clone, Debug, Deserialize)]
+pub struct DeleteDialog {
+    #[serde_inline_default(Style::default().fg([0.4, 0.5, 1.0]))]
+    pub path: Style,
+    #[serde_inline_default(Style::default())]
+    pub message: Style,
+}
+
 impl Default for Theme {
     fn default() -> Self {
         toml::from_str("").unwrap()
@@ -167,6 +186,12 @@ impl Default for ErrorView {
 }
 
 impl Default for HelpView {
+    fn default() -> Self {
+        toml::from_str("").unwrap()
+    }
+}
+
+impl Default for DeleteDialog {
     fn default() -> Self {
         toml::from_str("").unwrap()
     }

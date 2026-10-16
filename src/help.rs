@@ -1,4 +1,4 @@
-pub const HELP: &[(&'static str, &'static str, &'static str)] = &[
+pub const HELP: &[(&str, &str, &str)] = &[
     ("Keys", "Action", "Scope"),
     ("q", "Quit", "files"),
     ("q", "Back to file tree", "errors, help"),
@@ -26,6 +26,12 @@ pub const HELP: &[(&'static str, &'static str, &'static str)] = &[
         "Next header layout mode (single line/multi line)",
         "files",
     ),
+    ("m", "Next size metric (freed-by-deletion/naive)", "files"),
+    (
+        "d",
+        "Delete current entry (needs to be enabled in config)",
+        "files",
+    ),
     ("?", "Toggle this help screen", "files, errors"),
 ];
 
@@ -33,6 +39,12 @@ pub const HELP: &[(&'static str, &'static str, &'static str)] = &[
 pub struct HelpMeta {
     pub key_col_width: usize,
     pub action_col_width: usize,
+}
+
+impl Default for HelpMeta {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl HelpMeta {

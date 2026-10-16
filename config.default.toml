@@ -1,5 +1,8 @@
 # Path to a toml file specifying a theme.
-# Relative paths are resolved relative to the directory containing this config file, e.g. ~/.config/dumb/.
+#
+# Relative paths are resolved relative to the directory containing this config
+# file, e.g. ~/.config/dumb/.
+#
 # See `theme.default.toml` for available theming options.
 theme = "theme.default.toml"
 
@@ -8,3 +11,22 @@ default_header_layout = "single_line"
 
 # Can be one of `name`, `size`, or `mod_time`.
 default_sort_mode = "size"
+
+# The size metric used to display and sort entries:
+# - "freed" displays the size that would be freed if the entry would be
+#   deleted. This accounts for hardlinks, i.e. files that have hardlinks
+#   outside the directory are not counted, and files that have hardlinks
+#   only inside the directory are deduplicated.
+# - "naive" displays the size obtained from naively summing up the sizes of all
+#   contained paths.
+# Sizes are disk usage (allocated blocks), not apparent file sizes.
+# Can be toggled at runtime by pressing `m`.
+default_size_metric = "freed"
+
+# Enable the delete keybinding, which allows removing the selected directory
+# entry recursively when pressing `d`.
+enable_delete_binding = true
+
+# Pressing the delete keybinding shows a confirmation dialog, which requires
+# pressing `y` to delete.
+require_delete_confirmation = true
