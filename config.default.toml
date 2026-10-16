@@ -3,5 +3,8 @@
 # See `theme.default.toml` for available theming options.
 theme = "theme.default.toml"
 
+# The layout for the header line. Can be either "single_line" or "multi_line".
+default_header_layout = "single_line"
+
 # Can be one of `name`, `size`, or `mod_time`.
 default_sort_mode = "size"

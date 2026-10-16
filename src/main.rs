@@ -24,7 +24,7 @@ use crossterm::{
 
 use crate::{
     args::Args,
-    config::{Config, SortBy},
+    config::{Config, HeaderLayout, SortBy},
     file_tree::FileTree,
     help::{HELP, HelpMeta},
     motion::Motion,
@@ -116,6 +116,7 @@ fn run() -> Result<()> {
         term_size,
         frame: 0,
         sort_by: config.default_sort_mode,
+        header_layout: config.default_header_layout,
         sort_dirs_before_files: true,
         display_mode: DisplayMode::FileTree,
         help_meta: HelpMeta::new(),
@@ -213,6 +214,10 @@ fn handle_key_event(state: &mut State, key_event: KeyEvent) -> Option<bool> {
                 }
                 KeyCode::Char('S') => {
                     state.sort_dirs_before_files = !state.sort_dirs_before_files;
+                    true
+                }
+                KeyCode::Char('L') => {
+                    state.header_layout = state.header_layout.next();
                     true
                 }
                 KeyCode::Char('e') => {
@@ -449,6 +454,7 @@ pub struct State {
     pub sort_dirs_before_files: bool,
     pub display_mode: DisplayMode,
     pub help_meta: HelpMeta,
+    pub header_layout: HeaderLayout,
 }
 
 impl State {

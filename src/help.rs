@@ -21,6 +21,11 @@ pub const HELP: &[(&'static str, &'static str, &'static str)] = &[
         "Toggle sorting directories before files (only for sort by name)",
         "files",
     ),
+    (
+        "L",
+        "Next header layout mode (single line/multi line)",
+        "files",
+    ),
     ("?", "Toggle this help screen", "files, errors"),
 ];
 

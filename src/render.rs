@@ -14,6 +14,7 @@ use crossterm::{
 
 use crate::{
     DisplayMode, ErrorView, ErrorViewMode, HelpView, SortBy, State,
+    config::{Config, HeaderLayout},
     file_tree::{FileNode, FileState, FileTree},
     help::HELP,
     scan::Inode,
@@ -96,11 +97,17 @@ pub fn render_state(stdout: &mut Stdout, state: &mut State, theme: &Theme) -> Re
         }
     };
 
-    render_header(&mut w, &state, theme, &render_info)?;
+    let header_height = render_header(&mut w, &state, theme, &render_info)?;
     match &state.display_mode {
-        DisplayMode::FileTree => render_file_tree(&mut w, state, theme, &render_info)?,
-        DisplayMode::ErrorView(error_view) => render_errors(&mut w, &state, theme, error_view)?,
-        DisplayMode::HelpView(help_view) => render_help_view(&mut w, &state, theme, help_view)?,
+        DisplayMode::FileTree => {
+            render_file_tree(&mut w, state, theme, &render_info, header_height + 1)?
+        }
+        DisplayMode::ErrorView(error_view) => {
+            render_errors(&mut w, &state, theme, error_view, header_height + 1)?
+        }
+        DisplayMode::HelpView(help_view) => {
+            render_help_view(&mut w, &state, theme, help_view, header_height + 1)?
+        }
     };
 
     state.frame += 1;
@@ -118,17 +125,26 @@ pub struct RenderInfo {
     pub num_errors: usize,
 }
 
-fn render_header(w: &mut impl Write, state: &State, theme: &Theme, ri: &RenderInfo) -> Result<()> {
+fn render_header(w: &mut impl Write, state: &State, theme: &Theme, ri: &RenderInfo) -> Result<u16> {
     write!(w, "{}", cursor::MoveTo(0, 0))?;
     let style = &theme.header;
+
+    let mut y = 0;
 
     // Current Directory
     let prefix_str = state.target_path.to_string_lossy();
     let suffix_str = state.cur_subdir.to_string_lossy();
+
     style.path_prefix.write_text(w, prefix_str.as_ref())?;
     style.path_prefix.write_text(w, "/")?;
     style.path_suffix.write_text(w, suffix_str.as_ref())?;
-    style.label.write_text(w, "  ")?;
+    match state.header_layout {
+        HeaderLayout::SingleLine => style.label.write_text(w, "  ")?,
+        HeaderLayout::MultiLine => {
+            y += 1;
+            write!(w, "{}", cursor::MoveTo(0, y))?;
+        }
+    }
 
     // Size
     if state.cur_subdir.to_string_lossy().is_empty() {
@@ -183,7 +199,7 @@ fn render_header(w: &mut impl Write, state: &State, theme: &Theme, ri: &RenderIn
         _ => (),
     }
 
-    Ok(())
+    Ok(y + 1)
 }
 
 fn render_file_tree(
@@ -191,6 +207,7 @@ fn render_file_tree(
     state: &mut State,
     theme: &Theme,
     ri: &RenderInfo,
+    mut y: u16,
 ) -> Result<()> {
     let is_scan_done = match ri.target_dir_state {
         FileState::Queued | FileState::InProgress => false,
@@ -198,7 +215,7 @@ fn render_file_tree(
     };
 
     // File View Header
-    write!(w, "{}", cursor::MoveTo(0, 2))?;
+    write!(w, "{}", cursor::MoveTo(0, y))?;
     let style = &theme.file_table;
     if !is_scan_done {
         style.progress_header.write_text(w, "S")?;
@@ -232,19 +249,22 @@ fn render_file_tree(
     }
     style.modtime_header.write_text(w, "Last Modified")?;
 
+    y += 1;
+
     // File View Rows
     let file_tree = state.file_tree.lock().unwrap();
     let children = sorted_entries(&file_tree, state);
     let skip = i64::max(
         0,
-        state.cur_subdir_entry_ix() as i64 - ((state.term_size[1] as i64 - 3) / 2),
+        state.cur_subdir_entry_ix() as i64 - ((state.term_size[1] as i64 - y as i64) / 2),
     ) as usize;
     for (j, (i, (name, node, inode, is_dir))) in children.iter().enumerate().skip(skip).enumerate()
     {
-        if j + 3 >= state.term_size[1] as usize {
+        if y as usize + j >= state.term_size[1] as usize {
             break;
         }
-        write!(w, "{}", cursor::MoveTo(0, j as u16 + 3))?;
+        let y_cur = y + j as u16;
+        write!(w, "{}", cursor::MoveTo(0, y_cur))?;
         let is_selected = i == state.cur_subdir_entry_ix();
         let mut x = 0;
 
@@ -295,7 +315,7 @@ fn render_file_tree(
                 .collect();
             bg_style.write_text(w, &spaces)?;
         } else {
-            write!(w, "{}", cursor::MoveTo(x as u16, j as u16 + 3))?;
+            write!(w, "{}", cursor::MoveTo(x as u16, y_cur))?;
         };
         bg_style.write_text(w, "  ")?;
 
@@ -373,10 +393,10 @@ fn render_errors(
     state: &State,
     theme: &Theme,
     error_view: &ErrorView,
+    mut y: u16,
 ) -> Result<()> {
     let style = &theme.error_view;
 
-    let mut y = 2;
     let width = state.term_size[0] as usize;
     for (i, e) in error_view
         .errors
@@ -408,11 +428,12 @@ fn render_help_view(
     state: &State,
     theme: &Theme,
     help_view: &HelpView,
+    y: u16,
 ) -> Result<()> {
     let style = &theme.help_view;
 
     for (i, (keys, action, scope)) in HELP.iter().skip(help_view.cur_line_ix).enumerate() {
-        let y = i as u16 + 2;
+        let y = y + i as u16;
         if y >= state.term_size[1] {
             break;
         }
