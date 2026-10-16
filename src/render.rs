@@ -125,7 +125,12 @@ pub struct RenderInfo {
     pub num_errors: usize,
 }
 
-fn render_header(w: &mut impl Write, state: &State, theme: &Theme, ri: &RenderInfo) -> Result<u16> {
+fn render_header<W: Write>(
+    w: &mut W,
+    state: &State,
+    theme: &Theme,
+    ri: &RenderInfo,
+) -> Result<u16> {
     write!(w, "{}", cursor::MoveTo(0, 0))?;
     let style = &theme.header;
 
@@ -135,18 +140,29 @@ fn render_header(w: &mut impl Write, state: &State, theme: &Theme, ri: &RenderIn
     let prefix_str = state.target_path.to_string_lossy();
     let suffix_str = state.cur_subdir.to_string_lossy();
 
+    let next_field = |y: &mut u16, w: &mut W| -> Result<()> {
+        match state.header_layout {
+            HeaderLayout::SingleLine => style.label.write_text(w, "  ")?,
+            HeaderLayout::MultiLine => {
+                *y += 1;
+                write!(w, "{}", cursor::MoveTo(0, *y))?;
+            }
+        }
+        Ok(())
+    };
+
+    if state.header_layout == HeaderLayout::MultiLine {
+        style.label.write_text(w, "Cur Dir:  ")?;
+    }
     style.path_prefix.write_text(w, prefix_str.as_ref())?;
     style.path_prefix.write_text(w, "/")?;
     style.path_suffix.write_text(w, suffix_str.as_ref())?;
-    match state.header_layout {
-        HeaderLayout::SingleLine => style.label.write_text(w, "  ")?,
-        HeaderLayout::MultiLine => {
-            y += 1;
-            write!(w, "{}", cursor::MoveTo(0, y))?;
-        }
-    }
+    next_field(&mut y, w)?;
 
     // Size
+    if state.header_layout == HeaderLayout::MultiLine {
+        style.label.write_text(w, "Size:     ")?;
+    }
     if state.cur_subdir.to_string_lossy().is_empty() {
         let target_size_str = bytes_to_str(ri.target_dir_size);
         style.size_total.write_text(w, &target_size_str)?;
@@ -169,32 +185,44 @@ fn render_header(w: &mut impl Write, state: &State, theme: &Theme, ri: &RenderIn
         }
         style.label.write_text(w, ")")?;
     }
-    style.label.write_text(w, "  ")?;
+    next_field(&mut y, w)?;
 
     // Sort Mode
-    style.label.write_text(w, "Sort by ")?;
+    match state.header_layout {
+        HeaderLayout::SingleLine => style.label.write_text(w, "Sort by ")?,
+        HeaderLayout::MultiLine => style.label.write_text(w, "Sort by:  ")?,
+    }
     style
         .sort_mode
         .write_text(w, &format!("{:?}", state.sort_by))?;
 
     // Errors
     if ri.num_errors > 0 {
-        style.label.write_text(w, "  ")?;
-        let err_str = if ri.num_errors == 1 {
-            "error"
-        } else {
-            "errors"
-        };
-        style
-            .error
-            .write_text(w, &format!("{} {}", ri.num_errors, err_str))?;
+        next_field(&mut y, w)?;
+        match state.header_layout {
+            HeaderLayout::SingleLine => {
+                let err_str = if ri.num_errors == 1 {
+                    "error"
+                } else {
+                    "errors"
+                };
+                style
+                    .error
+                    .write_text(w, &format!("{} {}", ri.num_errors, err_str))?;
+            }
+            HeaderLayout::MultiLine => {
+                style.label.write_text(w, "Errors:   ")?;
+                style.error.write_text(w, &format!("{}", ri.num_errors))?;
+            }
+        }
     }
 
     // Spinner
     match &ri.target_dir_state {
         FileState::Queued | FileState::InProgress => {
+            next_field(&mut y, w)?;
             style.spinner.write(w)?;
-            write!(w, "  {}", loading_text(state.frame))?;
+            write!(w, "{}", loading_text(state.frame))?;
         }
         _ => (),
     }
