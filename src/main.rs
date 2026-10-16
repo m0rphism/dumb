@@ -1,6 +1,7 @@
 pub mod args;
 pub mod config;
 pub mod file_tree;
+pub mod help;
 pub mod motion;
 pub mod raw_mode;
 pub mod render;
@@ -25,6 +26,7 @@ use crate::{
     args::Args,
     config::{Config, SortBy},
     file_tree::FileTree,
+    help::{HELP, HelpMeta},
     motion::Motion,
     raw_mode::RawMode,
     render::{render_state, sorted_entries},
@@ -116,6 +118,7 @@ fn run() -> Result<()> {
         sort_by: config.default_sort_mode,
         sort_dirs_before_files: true,
         display_mode: DisplayMode::FileTree,
+        help_meta: HelpMeta::new(),
     };
 
     let mut stdout = stdout();
@@ -153,6 +156,7 @@ fn run() -> Result<()> {
 /// Returns `None` if the program should quit, or `Some(should_redraw)`.
 fn handle_key_event(state: &mut State, key_event: KeyEvent) -> Option<bool> {
     let redraw = if key_event.kind != KeyEventKind::Release {
+        let h = state.term_size[1];
         match &mut state.display_mode {
             DisplayMode::FileTree => match key_event.code {
                 KeyCode::Char('q') => return None,
@@ -262,6 +266,10 @@ fn handle_key_event(state: &mut State, key_event: KeyEvent) -> Option<bool> {
                         false
                     }
                 }
+                KeyCode::Char('?') => {
+                    state.display_mode = DisplayMode::HelpView(HelpView::default());
+                    true
+                }
                 _ => false,
             },
             DisplayMode::ErrorView(error_view) => match key_event.code {
@@ -286,6 +294,39 @@ fn handle_key_event(state: &mut State, key_event: KeyEvent) -> Option<bool> {
                 }
                 KeyCode::Char('u') if key_event.modifiers == KeyModifiers::CONTROL => {
                     error_view.apply_motion(Motion::HalfPageUp)
+                }
+                KeyCode::Char('?') => {
+                    state.display_mode = DisplayMode::HelpView(HelpView::default());
+                    true
+                }
+                _ => false,
+            },
+            DisplayMode::HelpView(help_view) => match key_event.code {
+                KeyCode::Char('q') | KeyCode::Char('?') => {
+                    state.display_mode = DisplayMode::FileTree;
+                    true
+                }
+                KeyCode::Char('j') | KeyCode::Down => help_view.apply_motion(Motion::Down, h),
+                KeyCode::Char('k') | KeyCode::Up => help_view.apply_motion(Motion::Up, h),
+                KeyCode::Char('g') | KeyCode::Home => help_view.apply_motion(Motion::First, h),
+                KeyCode::Char('G') | KeyCode::End => help_view.apply_motion(Motion::Last, h),
+                KeyCode::Char('f') if key_event.modifiers == KeyModifiers::CONTROL => {
+                    help_view.apply_motion(Motion::PageDown, h)
+                }
+                KeyCode::PageDown => help_view.apply_motion(Motion::PageDown, h),
+                KeyCode::Char('b') if key_event.modifiers == KeyModifiers::CONTROL => {
+                    help_view.apply_motion(Motion::PageUp, h)
+                }
+                KeyCode::PageUp => help_view.apply_motion(Motion::PageUp, h),
+                KeyCode::Char('d') if key_event.modifiers == KeyModifiers::CONTROL => {
+                    help_view.apply_motion(Motion::HalfPageDown, h)
+                }
+                KeyCode::Char('u') if key_event.modifiers == KeyModifiers::CONTROL => {
+                    help_view.apply_motion(Motion::HalfPageUp, h)
+                }
+                KeyCode::Char('?') => {
+                    state.display_mode = DisplayMode::FileTree;
+                    true
                 }
                 _ => false,
             },
@@ -357,6 +398,18 @@ pub enum Event {
 pub enum DisplayMode {
     FileTree,
     ErrorView(ErrorView),
+    HelpView(HelpView),
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct HelpView {
+    pub cur_line_ix: usize,
+}
+
+impl HelpView {
+    pub fn apply_motion(&mut self, motion: Motion, term_height: u16) -> bool {
+        motion.apply_check(&mut self.cur_line_ix, HELP.len(), term_height as usize - 3)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -395,6 +448,7 @@ pub struct State {
     pub sort_by: SortBy,
     pub sort_dirs_before_files: bool,
     pub display_mode: DisplayMode,
+    pub help_meta: HelpMeta,
 }
 
 impl State {

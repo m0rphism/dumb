@@ -13,8 +13,9 @@ use crossterm::{
 };
 
 use crate::{
-    DisplayMode, ErrorView, ErrorViewMode, SortBy, State,
+    DisplayMode, ErrorView, ErrorViewMode, HelpView, SortBy, State,
     file_tree::{FileNode, FileState, FileTree},
+    help::HELP,
     scan::Inode,
     theme::{Style, Theme, color_to_crossterm, interpolate_color},
 };
@@ -99,6 +100,7 @@ pub fn render_state(stdout: &mut Stdout, state: &mut State, theme: &Theme) -> Re
     match &state.display_mode {
         DisplayMode::FileTree => render_file_tree(&mut w, state, theme, &render_info)?,
         DisplayMode::ErrorView(error_view) => render_errors(&mut w, &state, theme, error_view)?,
+        DisplayMode::HelpView(help_view) => render_help_view(&mut w, &state, theme, help_view)?,
     };
 
     state.frame += 1;
@@ -409,6 +411,39 @@ fn render_errors(
         if y >= state.term_size[1] {
             break;
         }
+    }
+
+    Ok(())
+}
+
+fn render_help_view(
+    w: &mut impl Write,
+    state: &State,
+    theme: &Theme,
+    help_view: &HelpView,
+) -> Result<()> {
+    let style = &theme.help_view;
+
+    for (i, (keys, action, scope)) in HELP.iter().skip(help_view.cur_line_ix).enumerate() {
+        let y = i as u16 + 2;
+        if y >= state.term_size[1] {
+            break;
+        }
+        let (s_keys, s_action, s_scope) = if i == 0 {
+            (
+                &style.keys_header,
+                &style.action_header,
+                &style.scope_header,
+            )
+        } else {
+            (&style.keys, &style.action, &style.scope)
+        };
+        write!(w, "{}", cursor::MoveTo(0, y))?;
+        s_keys.write_text(w, keys)?;
+        s_keys.write_spaces(w, state.help_meta.key_col_width + 2 - keys.len())?;
+        s_action.write_text(w, action)?;
+        s_action.write_spaces(w, state.help_meta.action_col_width + 2 - action.len())?;
+        s_scope.write_text(w, scope)?;
     }
 
     Ok(())

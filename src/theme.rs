@@ -16,6 +16,8 @@ pub struct Theme {
     pub file_table: FileTable,
     #[serde_inline_default(ErrorView::default())]
     pub error_view: ErrorView,
+    #[serde_inline_default(HelpView::default())]
+    pub help_view: HelpView,
     #[serde_inline_default([0.2, 0.2, 0.2])]
     pub size_min_color: Color,
     #[serde_inline_default([1.0, 0.2, 0.2])]
@@ -119,6 +121,24 @@ pub struct ErrorView {
     pub message: Style,
 }
 
+#[serde_inline_default]
+#[derive(Clone, Debug, Deserialize)]
+pub struct HelpView {
+    #[serde_inline_default(Style::default().fg([0.8, 0.5, 0.8]).bold())]
+    pub keys_header: Style,
+    #[serde_inline_default(Style::default().fg([0.8, 0.8, 0.5]).bold())]
+    pub action_header: Style,
+    #[serde_inline_default(Style::default().fg([0.5, 0.8, 0.8]).bold())]
+    pub scope_header: Style,
+
+    #[serde_inline_default(Style::default().fg([0.8, 0.5, 0.8]))]
+    pub keys: Style,
+    #[serde_inline_default(Style::default().fg([0.8, 0.8, 0.5]))]
+    pub action: Style,
+    #[serde_inline_default(Style::default().fg([0.5, 0.8, 0.8]))]
+    pub scope: Style,
+}
+
 impl Default for Theme {
     fn default() -> Self {
         toml::from_str("").unwrap()
@@ -138,6 +158,12 @@ impl Default for FileTable {
 }
 
 impl Default for ErrorView {
+    fn default() -> Self {
+        toml::from_str("").unwrap()
+    }
+}
+
+impl Default for HelpView {
     fn default() -> Self {
         toml::from_str("").unwrap()
     }
@@ -221,10 +247,13 @@ impl Style {
         }
         Ok(())
     }
-    pub fn write_text(&self, mut w: &mut impl Write, content: &str) -> Result<(), std::io::Error> {
-        self.write(&mut w)?;
+    pub fn write_text(&self, w: &mut impl Write, content: &str) -> Result<(), std::io::Error> {
+        self.write(w)?;
         write!(w, "{}{}", content, ResetColor)?;
         Ok(())
+    }
+    pub fn write_spaces(&self, w: &mut impl Write, n: usize) -> Result<(), std::io::Error> {
+        self.write_text(w, &(0..n).map(|_| ' ').collect::<String>())
     }
 }
 
