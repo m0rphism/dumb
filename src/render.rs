@@ -125,38 +125,35 @@ fn render_header(w: &mut impl Write, state: &State, theme: &Theme, ri: &RenderIn
     // Current Directory
     let prefix_str = state.target_path.to_string_lossy();
     let suffix_str = state.cur_subdir.to_string_lossy();
-    style.label.write_text(w, "Current Directory: ")?;
     style.path_prefix.write_text(w, prefix_str.as_ref())?;
-    style.label.write_text(w, "/")?;
+    style.path_prefix.write_text(w, "/")?;
     style.path_suffix.write_text(w, suffix_str.as_ref())?;
-    style.label.write_text(w, ", ")?;
+    style.label.write_text(w, "  ")?;
 
     // Size
     if state.cur_subdir.to_string_lossy().is_empty() {
         let target_size_str = bytes_to_str(ri.target_dir_size);
-        style.label.write_text(w, "Size: ")?;
         style.size_total.write_text(w, &target_size_str)?;
     } else {
         let size_percent = (ri.cur_dir_size as f64 / ri.target_dir_size as f64) * 100.0;
         let target_size_str = bytes_to_str(ri.target_dir_size);
         let cur_dir_size_str = bytes_to_str(ri.cur_dir_size);
-        style.label.write_text(w, "Size: ")?;
         style.size_current.write_text(w, &cur_dir_size_str)?;
         style.label.write_text(w, " / ")?;
         style.size_total.write_text(w, &target_size_str)?;
         style.label.write_text(w, " (")?;
         if let Some(s) = &style.size_percent {
-            s.write_text(w, &format!("{size_percent:.2}"))?;
+            s.write_text(w, &format!("{size_percent:.2} %"))?;
         } else {
             let s = style::SetForegroundColor(color_to_crossterm(&percent_to_color(
                 size_percent,
                 theme,
             )));
-            write!(w, "{s}{size_percent:.2}{}", ResetColor)?;
+            write!(w, "{s}{size_percent:.2} %{}", ResetColor)?;
         }
         style.label.write_text(w, ")")?;
     }
-    style.label.write_text(w, ", ")?;
+    style.label.write_text(w, "  ")?;
 
     // Sort Mode
     style.label.write_text(w, "Sort by ")?;
@@ -166,7 +163,7 @@ fn render_header(w: &mut impl Write, state: &State, theme: &Theme, ri: &RenderIn
 
     // Errors
     if ri.num_errors > 0 {
-        style.label.write_text(w, ", ")?;
+        style.label.write_text(w, "  ")?;
         let err_str = if ri.num_errors == 1 {
             "error"
         } else {
@@ -181,7 +178,7 @@ fn render_header(w: &mut impl Write, state: &State, theme: &Theme, ri: &RenderIn
     match &ri.target_dir_state {
         FileState::Queued | FileState::InProgress => {
             style.label.write(w)?;
-            write!(w, ", Scanning {}", loading_text(state.frame))?;
+            write!(w, "  {}", loading_text(state.frame))?;
         }
         FileState::Finished => (),
         FileState::Failed(err) => {

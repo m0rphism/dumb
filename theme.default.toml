@@ -23,17 +23,17 @@ size_max_color = [1.0, 0.2, 0.2]
 # Style of the header line (first line in the terminal)
 [header]
 
-  # Style for captions like `Current Directory:`.
+  # Style for captions like `Sort by`.
   # An empty style value uses the terminals default style.
   label = {}
   
-  # Styles for the values after the `Current Directory:` label:
+  # Styles for the current directory:
   # - `path_prefix` applies to the directory specified via CLI arguments.
   # - `path_suffix` applies to everything that comes afterwards.
   path_prefix = { fg = [0.4, 0.5, 1.0] }
   path_suffix = { fg = [1.0, 0.4, 0.5] }
   
-  # Styles for the values after the `Size:` label:
+  # Styles for the size display:
   # - `size_current` is only visible if the user navigated into a subdirectory, and displays the total size
   #   of that subdiretory.
   # - `size_total` is always visible and displays the total size of the directory where `dumb` was started in

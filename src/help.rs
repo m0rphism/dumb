@@ -16,7 +16,11 @@ pub const HELP: &[(&'static str, &'static str, &'static str)] = &[
     ),
     ("E", "Toggle error view of all errors", "files, errors"),
     ("s", "Next sort mode (by size/by name/by modtime)", "files"),
-    // ("S", "Toggle sorting directories before files", "files"),
+    (
+        "S",
+        "Toggle sorting directories before files (only for sort by name)",
+        "files",
+    ),
     ("?", "Toggle this help screen", "files, errors"),
 ];
 
