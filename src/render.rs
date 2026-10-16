@@ -174,23 +174,13 @@ fn render_header(w: &mut impl Write, state: &State, theme: &Theme, ri: &RenderIn
             .write_text(w, &format!("{} {}", ri.num_errors, err_str))?;
     }
 
-    // Progress State
+    // Spinner
     match &ri.target_dir_state {
         FileState::Queued | FileState::InProgress => {
-            style.label.write(w)?;
+            style.spinner.write(w)?;
             write!(w, "  {}", loading_text(state.frame))?;
         }
-        FileState::Finished => (),
-        FileState::Failed(err) => {
-            style.label.write(w)?;
-            write!(
-                w,
-                ", {}ERROR: {}{}",
-                style::SetForegroundColor(rgb(1.0, 0.0, 0.0)),
-                err,
-                style::ResetColor,
-            )?;
-        }
+        _ => (),
     }
 
     Ok(())

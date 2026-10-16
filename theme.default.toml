@@ -50,6 +50,9 @@ size_max_color = [1.0, 0.2, 0.2]
   # Style for the scan error count (only displayed if there are actually errors).
   error = { fg = [1.0, 0.0, 0.0] }
 
+  # Style for the progress spinner (only displayed during scanning).
+  spinner = {}
+
 # Style of the fileview below the header line
 [file_table]
 

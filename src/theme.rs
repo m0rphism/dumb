@@ -51,6 +51,9 @@ pub struct Header {
 
     #[serde_inline_default(Style::default().fg([1.0, 0.0, 0.0]))]
     pub error: Style,
+
+    #[serde_inline_default(Style::default())]
+    pub spinner: Style,
 }
 
 #[serde_inline_default]
