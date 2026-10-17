@@ -305,12 +305,10 @@ fn render_file_tree(
     style.size_abs_header.write_text(w, "Size Abs")?;
     write!(w, "  ")?;
 
-    write!(w, "  ")?;
     style.size_rel_header.write_text(w, "Size Rel")?;
     write!(w, "  ")?;
 
     if show_size_cur {
-        write!(w, "  ")?;
         style.size_cur_header.write_text(w, "Size Cur")?;
         write!(w, "  ")?;
     }
@@ -399,7 +397,7 @@ fn render_file_tree(
         // Size Rel
         let abs_size_percent = (*size as f64 / ri.target_dir_size as f64) * 100.0;
         let abs_size_percent_str = format!("{:6.2} %", abs_size_percent);
-        let spaces: String = (abs_size_percent_str.len()..10).map(|_| " ").collect();
+        let spaces: String = (abs_size_percent_str.len()..8).map(|_| " ").collect();
         bg_style.write_text(w, &spaces)?;
         if let Some(s) = &style.size_rel_value {
             style_mod(s).write(w)?;
@@ -418,7 +416,7 @@ fn render_file_tree(
         if show_size_cur {
             let size_percent = (*size as f64 / ri.cur_dir_size as f64) * 100.0;
             let size_percent_str = format!("{:6.2} %", size_percent);
-            let spaces: String = (abs_size_percent_str.len()..10).map(|_| " ").collect();
+            let spaces: String = (abs_size_percent_str.len()..8).map(|_| " ").collect();
             bg_style.write_text(w, &spaces)?;
             if let Some(s) = &style.size_cur_value {
                 s.write(w)?;
@@ -435,16 +433,8 @@ fn render_file_tree(
 
         // Last Modified
         let last_modified = DateTime::<Local>::from(inode.last_modified);
-        let s_val = format!(
-            "{}{}",
-            ResetColor,
-            style_mod(&style.modtime_value)
-        );
-        let s_delim = format!(
-            "{}{}",
-            ResetColor,
-            style_mod(&style.modtime_delim)
-        );
+        let s_val = format!("{}{}", ResetColor, style_mod(&style.modtime_value));
+        let s_delim = format!("{}{}", ResetColor, style_mod(&style.modtime_delim));
         let last_modified = last_modified
             .format("%Y[-]%m[-]%d %H[:]%M[:]%S")
             .to_string()
