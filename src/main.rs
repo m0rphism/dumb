@@ -31,7 +31,7 @@ use crate::{
     help::{HELP, HelpMeta},
     motion::Motion,
     raw_mode::RawMode,
-    render::{other_columns_width, render_state, sorted_entries},
+    render::{fixed_columns_width, render_state, sorted_entries},
     scan::{Inode, scan},
     theme::Theme,
 };
@@ -548,7 +548,7 @@ impl State {
 
     pub fn auto_name_col_width(&self) -> i64 {
         let leftover = self.term_size[0] as i64
-            - other_columns_width(self.is_scan_done(), self.show_size_cur());
+            - fixed_columns_width(self.is_scan_done(), self.show_size_cur());
         let w = if self.max_name_column_width > 0 {
             leftover.min(self.max_name_column_width)
         } else {

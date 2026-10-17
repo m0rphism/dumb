@@ -129,7 +129,7 @@ pub fn render_state(stdout: &mut Stdout, state: &mut State, theme: &Theme) -> Re
         }
     };
 
-    // Transient status message (e.g. a failed deletion) on the bottom line.
+    // Status message (e.g. a failed deletion) on the bottom line.
     if let Some(msg) = &state.status {
         let width = state.term_size[0].saturating_sub(1) as usize;
         let msg: String = msg.chars().take(width).collect();
@@ -156,16 +156,84 @@ pub struct RenderInfo {
     pub num_errors: usize,
 }
 
-pub fn other_columns_width(is_scan_done: bool, show_size_cur: bool) -> i64 {
-    // TODO: This is absolutely horrifying. We need a proper layout abstraction for the table rendering.
-    let mut w = 2 + 10 + 2 + 8 + 2 + 19;
-    if show_size_cur {
-        w += 8 + 2;
+/// The number of spaces between two adjacent columns of the file table.
+const COLUMN_GAP: u16 = 2;
+
+/// A column of the file table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Column {
+    /// Scan progress indicator. Only visible while the scan is running.
+    Progress,
+    /// Entry name. The only column whose width is not fixed.
+    Name,
+    /// Absolute size of the entry.
+    SizeAbs,
+    /// Size of the entry relative to the scan target.
+    SizeRel,
+    /// Size of the entry relative to the current directory.
+    SizeCur,
+    /// Last modification time of the entry.
+    ModTime,
+}
+
+impl Column {
+    pub fn header(self) -> &'static str {
+        match self {
+            Column::Progress => "S",
+            Column::Name => "Name",
+            Column::SizeAbs => "Size Abs",
+            Column::SizeRel => "Size Rel",
+            Column::SizeCur => "Size Cur",
+            Column::ModTime => "Last Modified",
+        }
     }
+
+    pub fn width(self, name_col_width: u16) -> u16 {
+        match self {
+            Column::Progress => 1,
+            Column::Name => name_col_width,
+            Column::SizeAbs => 10,
+            Column::SizeRel => 8,
+            Column::SizeCur => 8,
+            Column::ModTime => 19,
+        }
+    }
+
+    pub fn right_aligned(self) -> bool {
+        match self {
+            Column::Progress | Column::Name | Column::ModTime => false,
+            Column::SizeAbs | Column::SizeRel | Column::SizeCur => true,
+        }
+    }
+}
+
+/// The columns of the file table in display order for a given display state.
+pub fn table_columns(is_scan_done: bool, show_size_cur: bool) -> Vec<Column> {
+    let mut cols = Vec::new();
     if !is_scan_done {
-        w += 3;
+        cols.push(Column::Progress);
     }
-    w
+    cols.push(Column::Name);
+    cols.push(Column::SizeAbs);
+    cols.push(Column::SizeRel);
+    if show_size_cur {
+        cols.push(Column::SizeCur);
+    }
+    cols.push(Column::ModTime);
+    cols
+}
+
+/// The total width of the file table columns, including the gaps between them.
+pub fn columns_width(cols: &[Column], name_col_width: u16) -> u16 {
+    cols.iter().map(|c| c.width(name_col_width)).sum::<u16>()
+        + COLUMN_GAP.saturating_mul(cols.len().saturating_sub(1) as u16)
+}
+
+/// The total width consumed by all columns other than the Name column,
+/// including the gaps between the columns. This determines how much terminal
+/// width is left for the auto-sized Name column.
+pub fn fixed_columns_width(is_scan_done: bool, show_size_cur: bool) -> i64 {
+    columns_width(&table_columns(is_scan_done, show_size_cur), 0) as i64
 }
 
 fn render_header<W: Write>(
@@ -228,8 +296,6 @@ fn render_header<W: Write>(
         }
         style.label.write_text(w, ")")?;
     }
-    // The active size metric, e.g. ` [freed]`: the brackets use the label
-    // style, the metric itself the size_metric style.
     style.label.write_text(w, " [")?;
     style
         .size_metric
@@ -288,51 +354,47 @@ fn render_file_tree(
         FileState::Queued => false,
         FileState::Finished | FileState::Failed(_) => true,
     };
-    // The Size Cur column is only relevant in a subdirectory and can be
-    // toggled with `c`.
     let show_size_cur = state.show_size_cur();
-
-    // File View Header
-    write!(w, "{}", cursor::MoveTo(0, y))?;
-    let style = &theme.file_table;
-    if !is_scan_done {
-        style.progress_header.write_text(w, "S")?;
-        write!(w, "  ")?;
-    }
-    // A width of 0 means auto width.
     let name_col_width = if state.name_col_width > 0 {
         state.name_col_width
     } else {
         state.auto_name_col_width()
-    };
-    style.name_header.write_text(w, "Name")?;
-    write!(w, "  ")?;
-    for _ in 0..name_col_width - 4 {
-        write!(w, " ")?;
+    } as u16;
+    let cols = table_columns(is_scan_done, show_size_cur);
+
+    // Header
+    let style = &theme.file_table;
+    let mut x = 0;
+    for col in &cols {
+        write!(w, "{}", cursor::MoveTo(x, y))?;
+        let header_style = match col {
+            Column::Progress => &style.progress_header,
+            Column::Name => &style.name_header,
+            Column::SizeAbs => &style.size_abs_header,
+            Column::SizeRel => &style.size_rel_header,
+            Column::SizeCur => &style.size_cur_header,
+            Column::ModTime => &style.modtime_header,
+        };
+        if col.right_aligned() {
+            let pad = col
+                .width(name_col_width)
+                .saturating_sub(col.header().len() as u16) as usize;
+            write!(w, "{}", " ".repeat(pad))?;
+        }
+        header_style.write_text(w, col.header())?;
+        x += col.width(name_col_width) + COLUMN_GAP;
     }
-
-    write!(w, "  ")?;
-    style.size_abs_header.write_text(w, "Size Abs")?;
-    write!(w, "  ")?;
-
-    style.size_rel_header.write_text(w, "Size Rel")?;
-    write!(w, "  ")?;
-
-    if show_size_cur {
-        style.size_cur_header.write_text(w, "Size Cur")?;
-        write!(w, "  ")?;
-    }
-    style.modtime_header.write_text(w, "Last Modified")?;
 
     y += 1;
 
-    // File View Rows
+    // Rows
     let file_tree = state.file_tree.lock().unwrap();
     let children = sorted_entries(&file_tree, state);
     let skip = i64::max(
         0,
         state.cur_subdir_entry_ix() as i64 - ((state.term_size[1] as i64 - y as i64) / 2),
     ) as usize;
+    let row_width = columns_width(&cols, name_col_width);
     for (j, (i, (name, node, inode, is_dir, size))) in
         children.iter().enumerate().skip(skip).enumerate()
     {
@@ -340,11 +402,9 @@ fn render_file_tree(
             break;
         }
         let y_cur = y + j as u16;
-        write!(w, "{}", cursor::MoveTo(0, y_cur))?;
         let is_selected = i == state.cur_subdir_entry_ix();
-        let mut x = 0;
-
         let has_error = node.num_child_errors > 0 || matches!(node.state, FileState::Failed(_));
+        let highlighted = is_selected || has_error;
 
         let style_mod = |s: &Style| match (is_selected, has_error) {
             (true, true) => s.merge(&style.selected_error_row),
@@ -355,104 +415,96 @@ fn render_file_tree(
 
         let bg_style = style_mod(&Style::default());
 
-        // State
-        if !is_scan_done {
-            let state_str = match node.state {
-                FileState::Queued => "…",
-                FileState::Finished => " ",
-                FileState::Failed(_) => "E",
-            };
-            style_mod(&style.progress_value).write_text(w, state_str)?;
-            bg_style.write_text(w, "  ")?;
-            x += 3;
+        // Paint the full row background first, so that selected and error rows are highlighted
+        // across all cells and gaps.
+        if highlighted {
+            write!(w, "{}", cursor::MoveTo(0, y_cur))?;
+            bg_style.write_spaces(w, row_width as usize)?;
         }
 
-        // File Name
-        let mut name = name
-            .to_string_lossy()
-            .chars()
-            .take(name_col_width as usize)
-            .collect::<String>();
-        if *is_dir {
-            name += "/";
-        }
-        let s = if inode.is_dir {
-            &style.name_dir_value
-        } else if inode.num_hardlinks > 1 {
-            &style.name_hardlink_value
-        } else {
-            &style.name_file_value
-        };
-        style_mod(s).write_text(w, &name)?;
-        x += name_col_width;
-
-        // Make sure background color is printed even if name is shorter than max length.
-        if is_selected || has_error {
-            let spaces: String = (name.chars().count()..name_col_width as usize)
-                .map(|_| " ")
-                .collect();
-            bg_style.write_text(w, &spaces)?;
-        } else {
-            write!(w, "{}", cursor::MoveTo(x as u16, y_cur))?;
-        };
-        bg_style.write_text(w, "  ")?;
-
-        // Size Abs
-        let size_abs_str = bytes_to_str(*size);
-        let spaces: String = (size_abs_str.len()..10).map(|_| " ").collect();
-        bg_style.write_text(w, &spaces)?;
-        style_mod(&style.size_abs_value).write_text(w, &size_abs_str)?;
-        bg_style.write_text(w, "  ")?;
-
-        // Size Rel
-        let abs_size_percent = (*size as f64 / ri.target_dir_size as f64) * 100.0;
-        let abs_size_percent_str = format!("{:6.2} %", abs_size_percent);
-        let spaces: String = (abs_size_percent_str.len()..8).map(|_| " ").collect();
-        bg_style.write_text(w, &spaces)?;
-        if let Some(s) = &style.size_rel_value {
-            style_mod(s).write(w)?;
-        } else {
-            let mut s = bg_style.clone();
-            if !has_error {
-                s = s.fg(percent_to_color(abs_size_percent, theme));
+        let mut x = 0;
+        for col in &cols {
+            let width = col.width(name_col_width) as usize;
+            write!(w, "{}", cursor::MoveTo(x, y_cur))?;
+            match col {
+                Column::Progress => {
+                    let state_str = match node.state {
+                        FileState::Queued => "…",
+                        FileState::Finished => " ",
+                        FileState::Failed(_) => "E",
+                    };
+                    style_mod(&style.progress_value).write_text(w, state_str)?;
+                }
+                Column::Name => {
+                    let mut name = name
+                        .to_string_lossy()
+                        .chars()
+                        .take(width)
+                        .collect::<String>();
+                    if *is_dir {
+                        name += "/";
+                    }
+                    let s = if inode.is_dir {
+                        &style.name_dir_value
+                    } else if inode.num_hardlinks > 1 {
+                        &style.name_hardlink_value
+                    } else {
+                        &style.name_file_value
+                    };
+                    style_mod(s).write_text(w, &name)?;
+                }
+                Column::SizeAbs => {
+                    let size_abs_str = bytes_to_str(*size);
+                    bg_style.write_spaces(w, width.saturating_sub(size_abs_str.len()))?;
+                    style_mod(&style.size_abs_value).write_text(w, &size_abs_str)?;
+                }
+                Column::SizeRel => {
+                    let abs_size_percent = (*size as f64 / ri.target_dir_size as f64) * 100.0;
+                    let abs_size_percent_str = format!("{:6.2} %", abs_size_percent);
+                    bg_style.write_spaces(w, width.saturating_sub(abs_size_percent_str.len()))?;
+                    if let Some(s) = &style.size_rel_value {
+                        style_mod(s).write(w)?;
+                    } else {
+                        let mut s = bg_style.clone();
+                        if !has_error {
+                            s = s.fg(percent_to_color(abs_size_percent, theme));
+                        }
+                        s.write(w)?;
+                    }
+                    write!(w, "{}", abs_size_percent_str)?;
+                    write!(w, "{}", style::ResetColor)?;
+                }
+                Column::SizeCur => {
+                    let size_percent = (*size as f64 / ri.cur_dir_size as f64) * 100.0;
+                    let size_percent_str = format!("{:6.2} %", size_percent);
+                    bg_style.write_spaces(w, width.saturating_sub(size_percent_str.len()))?;
+                    if let Some(s) = &style.size_cur_value {
+                        s.write(w)?;
+                    } else {
+                        bg_style
+                            .clone()
+                            .fg(percent_to_color(size_percent, theme))
+                            .write(w)?;
+                    }
+                    write!(w, "{}", size_percent_str)?;
+                    write!(w, "{}", style::ResetColor)?;
+                }
+                Column::ModTime => {
+                    let last_modified = DateTime::<Local>::from(inode.last_modified);
+                    let s_val = format!("{}{}", ResetColor, style_mod(&style.modtime_value));
+                    let s_delim = format!("{}{}", ResetColor, style_mod(&style.modtime_delim));
+                    let last_modified = last_modified
+                        .format("%Y[-]%m[-]%d %H[:]%M[:]%S")
+                        .to_string()
+                        .replace("[", &s_delim)
+                        .replace("]", &s_val);
+                    write!(w, "{}", s_val)?;
+                    write!(w, "{}", last_modified)?;
+                    write!(w, "{}", style::ResetColor)?;
+                }
             }
-            s.write(w)?;
+            x += col.width(name_col_width) + COLUMN_GAP;
         }
-        write!(w, "{}", abs_size_percent_str)?;
-        write!(w, "{}", style::ResetColor)?;
-        bg_style.write_text(w, "  ")?;
-
-        // Size Cur
-        if show_size_cur {
-            let size_percent = (*size as f64 / ri.cur_dir_size as f64) * 100.0;
-            let size_percent_str = format!("{:6.2} %", size_percent);
-            let spaces: String = (size_percent_str.len()..8).map(|_| " ").collect();
-            bg_style.write_text(w, &spaces)?;
-            if let Some(s) = &style.size_cur_value {
-                s.write(w)?;
-            } else {
-                bg_style
-                    .clone()
-                    .fg(percent_to_color(size_percent, theme))
-                    .write(w)?;
-            }
-            write!(w, "{}", size_percent_str)?;
-            write!(w, "{}", style::ResetColor)?;
-            bg_style.write_text(w, "  ")?;
-        }
-
-        // Last Modified
-        let last_modified = DateTime::<Local>::from(inode.last_modified);
-        let s_val = format!("{}{}", ResetColor, style_mod(&style.modtime_value));
-        let s_delim = format!("{}{}", ResetColor, style_mod(&style.modtime_delim));
-        let last_modified = last_modified
-            .format("%Y[-]%m[-]%d %H[:]%M[:]%S")
-            .to_string()
-            .replace("[", &s_delim)
-            .replace("]", &s_val);
-        write!(w, "{}", s_val)?;
-        write!(w, "{}", last_modified)?;
-        write!(w, "{}", style::ResetColor)?;
     }
 
     Ok(())
