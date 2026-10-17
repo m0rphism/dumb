@@ -129,6 +129,7 @@ fn run() -> Result<()> {
         header_layout: config.default_header_layout,
         size_metric: config.default_size_metric,
         sort_dirs_before_files: true,
+        show_size_cur_column: config.default_show_size_cur_column,
         display_mode: DisplayMode::FileTree,
         help_meta: HelpMeta::new(),
         status: None,
@@ -239,6 +240,10 @@ fn handle_key_event(state: &mut State, config: &Config, key_event: KeyEvent) -> 
                 }
                 KeyCode::Char('m') => {
                     state.size_metric = state.size_metric.next();
+                    true
+                }
+                KeyCode::Char('c') => {
+                    state.show_size_cur_column = !state.show_size_cur_column;
                     true
                 }
                 KeyCode::Char('e') => {
@@ -490,6 +495,7 @@ pub struct State {
     pub sort_by: SortBy,
     pub size_metric: SizeMetric,
     pub sort_dirs_before_files: bool,
+    pub show_size_cur_column: bool,
     pub display_mode: DisplayMode,
     pub help_meta: HelpMeta,
     pub header_layout: HeaderLayout,

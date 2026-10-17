@@ -22,6 +22,9 @@ pub struct Config {
     pub default_size_metric: SizeMetric,
 
     #[serde_inline_default(true)]
+    pub default_show_size_cur_column: bool,
+
+    #[serde_inline_default(true)]
     pub enable_delete_binding: bool,
 
     #[serde_inline_default(true)]

@@ -23,6 +23,11 @@ default_sort_mode = "size"
 # Can be toggled at runtime by pressing `m`.
 default_size_metric = "freed"
 
+# Whether to show the `Size Cur` column (the size relative to the current
+# directory) by default. The column is only relevant in subdirectories.
+# Can be toggled at runtime by pressing `c`.
+default_show_size_cur_column = true
+
 # Enable the delete keybinding, which allows removing the selected directory
 # entry recursively when pressing `d`.
 enable_delete_binding = true

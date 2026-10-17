@@ -27,6 +27,7 @@ pub const HELP: &[(&str, &str, &str)] = &[
         "files",
     ),
     ("m", "Next size metric (freed-by-deletion/naive)", "files"),
+    ("c", "Toggle the Size Cur column", "files"),
     (
         "d",
         "Delete current entry (needs to be enabled in config)",

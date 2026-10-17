@@ -276,6 +276,10 @@ fn render_file_tree(
         FileState::Queued => false,
         FileState::Finished | FileState::Failed(_) => true,
     };
+    // The Size Cur column is only relevant in a subdirectory and can be
+    // toggled with `c`.
+    let show_size_cur =
+        state.show_size_cur_column && !state.cur_subdir.to_string_lossy().is_empty();
 
     // File View Header
     write!(w, "{}", cursor::MoveTo(0, y))?;
@@ -305,7 +309,7 @@ fn render_file_tree(
     style.size_rel_header.write_text(w, "Size Rel")?;
     write!(w, "  ")?;
 
-    if !state.cur_subdir.to_string_lossy().is_empty() {
+    if show_size_cur {
         write!(w, "  ")?;
         style.size_cur_header.write_text(w, "Size Cur")?;
         write!(w, "  ")?;
@@ -411,7 +415,7 @@ fn render_file_tree(
         bg_style.write_text(w, "  ")?;
 
         // Size Cur
-        if !state.cur_subdir.to_string_lossy().is_empty() {
+        if show_size_cur {
             let size_percent = (*size as f64 / ri.cur_dir_size as f64) * 100.0;
             let size_percent_str = format!("{:6.2} %", size_percent);
             let spaces: String = (abs_size_percent_str.len()..10).map(|_| " ").collect();
