@@ -426,14 +426,14 @@ fn render_file_tree(
         if show_size_cur {
             let size_percent = (*size as f64 / ri.cur_dir_size as f64) * 100.0;
             let size_percent_str = format!("{:6.2} %", size_percent);
-            let spaces: String = (abs_size_percent_str.len()..8).map(|_| " ").collect();
+            let spaces: String = (size_percent_str.len()..8).map(|_| " ").collect();
             bg_style.write_text(w, &spaces)?;
             if let Some(s) = &style.size_cur_value {
                 s.write(w)?;
             } else {
                 bg_style
                     .clone()
-                    .fg(percent_to_color(abs_size_percent, theme))
+                    .fg(percent_to_color(size_percent, theme))
                     .write(w)?;
             }
             write!(w, "{}", size_percent_str)?;
