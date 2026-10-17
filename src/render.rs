@@ -6,19 +6,16 @@ use std::{
 
 use anyhow::Result;
 use chrono::{DateTime, Local};
-use crossterm::{
-    cursor,
-    style::{self, Color, ResetColor},
-    terminal::{Clear, ClearType},
-};
+use crossterm::style::Color;
 
 use crate::{
     DisplayMode, ErrorView, HelpView, SortBy, State,
     config::{HeaderLayout, SizeMetric},
     file_tree::{FileNode, FileState, FileTree},
+    frame::{Frame, LineWriter},
     help::HELP,
     scan::Inode,
-    theme::{Style, Theme, color_to_crossterm, interpolate_color},
+    theme::{Style, Theme, interpolate_color},
 };
 
 pub fn rgb(r: f32, g: f32, b: f32) -> Color {
@@ -90,9 +87,8 @@ pub fn render_state(stdout: &mut Stdout, state: &mut State, theme: &Theme) -> Re
     // We buffer all rendering before sending it to stdout to remove terminal flickering.
     // Flickering shouldn't be an issue if stdout is only flushed at the end, but for some reason
     // it is...
-    let mut w = vec![];
-
-    write!(w, "{}", Clear(ClearType::All))?;
+    let mut frame = Frame::new();
+    frame.clear();
 
     let render_info = {
         let file_tree = state.file_tree.lock().unwrap();
@@ -108,24 +104,24 @@ pub fn render_state(stdout: &mut Stdout, state: &mut State, theme: &Theme) -> Re
         }
     };
 
-    let header_height = render_header(&mut w, state, theme, &render_info)?;
+    let header_height = render_header(&mut frame, state, theme, &render_info);
     match &state.display_mode {
         DisplayMode::FileTree => {
-            render_file_tree(&mut w, state, theme, &render_info, header_height + 1)?
+            render_file_tree(&mut frame, state, theme, &render_info, header_height + 1);
         }
         DisplayMode::ErrorView(error_view) => {
-            render_errors(&mut w, state, theme, error_view, header_height + 1)?
+            render_errors(&mut frame, state, theme, error_view, header_height + 1);
         }
         DisplayMode::HelpView(help_view) => {
-            render_help_view(&mut w, state, theme, help_view, header_height + 1)?
+            render_help_view(&mut frame, state, theme, help_view, header_height + 1);
         }
         DisplayMode::DeleteDialog(target) => {
             render_delete_dialog(
-                &mut w,
+                &mut frame,
                 theme,
                 header_height + 1,
                 &state.target_path.join(target),
-            )?;
+            );
         }
     };
 
@@ -133,17 +129,13 @@ pub fn render_state(stdout: &mut Stdout, state: &mut State, theme: &Theme) -> Re
     if let Some(msg) = &state.status {
         let width = state.term_size[0].saturating_sub(1) as usize;
         let msg: String = msg.chars().take(width).collect();
-        write!(
-            w,
-            "{}",
-            cursor::MoveTo(0, state.term_size[1].saturating_sub(1))
-        )?;
-        theme.header.error.write_text(&mut w, &msg)?;
+        let mut line = frame.line(state.term_size[1].saturating_sub(1));
+        line.text(&theme.header.error, &msg);
     }
 
     state.frame += 1;
 
-    stdout.write_all(&w)?;
+    stdout.write_all(frame.bytes())?;
     stdout.flush()?;
 
     Ok(())
@@ -236,85 +228,61 @@ pub fn fixed_columns_width(is_scan_done: bool, show_size_cur: bool) -> i64 {
     columns_width(&table_columns(is_scan_done, show_size_cur), 0) as i64
 }
 
-fn render_header<W: Write>(
-    w: &mut W,
-    state: &State,
-    theme: &Theme,
-    ri: &RenderInfo,
-) -> Result<u16> {
-    write!(w, "{}", cursor::MoveTo(0, 0))?;
+fn render_header(frame: &mut Frame, state: &State, theme: &Theme, ri: &RenderInfo) -> u16 {
     let style = &theme.header;
-
-    let mut y = 0;
+    let mut line = frame.line(0);
 
     // Current Directory
     let prefix_str = state.target_path.to_string_lossy();
     let suffix_str = state.cur_subdir.to_string_lossy();
 
-    let next_field = |y: &mut u16, w: &mut W| -> Result<()> {
-        match state.header_layout {
-            HeaderLayout::SingleLine => style.label.write_text(w, "  ")?,
-            HeaderLayout::MultiLine => {
-                *y += 1;
-                write!(w, "{}", cursor::MoveTo(0, *y))?;
-            }
-        }
-        Ok(())
-    };
-
     if state.header_layout == HeaderLayout::MultiLine {
-        style.label.write_text(w, "Cur Dir:  ")?;
+        line.text(&style.label, "Cur Dir:  ");
     }
-    style.path_prefix.write_text(w, prefix_str.as_ref())?;
-    style.path_prefix.write_text(w, "/")?;
-    style.path_suffix.write_text(w, suffix_str.as_ref())?;
-    next_field(&mut y, w)?;
+    line.text(&style.path_prefix, prefix_str.as_ref());
+    line.text(&style.path_prefix, "/");
+    line.text(&style.path_suffix, suffix_str.as_ref());
+    next_field(&mut line, &style.label, state.header_layout);
 
     // Size
     if state.header_layout == HeaderLayout::MultiLine {
-        style.label.write_text(w, "Size:     ")?;
+        line.text(&style.label, "Size:     ");
     }
     if state.cur_subdir.to_string_lossy().is_empty() {
         let target_size_str = bytes_to_str(ri.target_dir_size);
-        style.size_total.write_text(w, &target_size_str)?;
+        line.text(&style.size_total, &target_size_str);
     } else {
         let size_percent = (ri.cur_dir_size as f64 / ri.target_dir_size as f64) * 100.0;
         let target_size_str = bytes_to_str(ri.target_dir_size);
         let cur_dir_size_str = bytes_to_str(ri.cur_dir_size);
-        style.size_current.write_text(w, &cur_dir_size_str)?;
-        style.label.write_text(w, " / ")?;
-        style.size_total.write_text(w, &target_size_str)?;
-        style.label.write_text(w, " (")?;
+        line.text(&style.size_current, &cur_dir_size_str);
+        line.text(&style.label, " / ");
+        line.text(&style.size_total, &target_size_str);
+        line.text(&style.label, " (");
+        let percent_str = format!("{size_percent:.2} %");
         if let Some(s) = &style.size_percent {
-            s.write_text(w, &format!("{size_percent:.2} %"))?;
+            line.text(s, &percent_str);
         } else {
-            let s = style::SetForegroundColor(color_to_crossterm(&percent_to_color(
-                size_percent,
-                theme,
-            )));
-            write!(w, "{s}{size_percent:.2} %{}", ResetColor)?;
+            let s = Style::default().fg(percent_to_color(size_percent, theme));
+            line.text(&s, &percent_str);
         }
-        style.label.write_text(w, ")")?;
+        line.text(&style.label, ")");
     }
-    style.label.write_text(w, " [")?;
-    style
-        .size_metric
-        .write_text(w, state.size_metric.as_str())?;
-    style.label.write_text(w, "]")?;
-    next_field(&mut y, w)?;
+    line.text(&style.label, " [");
+    line.text(&style.size_metric, state.size_metric.as_str());
+    line.text(&style.label, "]");
+    next_field(&mut line, &style.label, state.header_layout);
 
     // Sort Mode
     match state.header_layout {
-        HeaderLayout::SingleLine => style.label.write_text(w, "Sort by ")?,
-        HeaderLayout::MultiLine => style.label.write_text(w, "Sort by:  ")?,
+        HeaderLayout::SingleLine => line.text(&style.label, "Sort by "),
+        HeaderLayout::MultiLine => line.text(&style.label, "Sort by:  "),
     }
-    style
-        .sort_mode
-        .write_text(w, &format!("{:?}", state.sort_by))?;
+    line.text(&style.sort_mode, &format!("{:?}", state.sort_by));
 
     // Errors
     if ri.num_errors > 0 {
-        next_field(&mut y, w)?;
+        next_field(&mut line, &style.label, state.header_layout);
         match state.header_layout {
             HeaderLayout::SingleLine => {
                 let err_str = if ri.num_errors == 1 {
@@ -322,34 +290,38 @@ fn render_header<W: Write>(
                 } else {
                     "errors"
                 };
-                style
-                    .error
-                    .write_text(w, &format!("{} {}", ri.num_errors, err_str))?;
+                line.text(&style.error, &format!("{} {}", ri.num_errors, err_str));
             }
             HeaderLayout::MultiLine => {
-                style.label.write_text(w, "Errors:   ")?;
-                style.error.write_text(w, &format!("{}", ri.num_errors))?;
+                line.text(&style.label, "Errors:   ");
+                line.text(&style.error, &format!("{}", ri.num_errors));
             }
         }
     }
 
     // Spinner
     if matches!(ri.target_dir_state, FileState::Queued) {
-        next_field(&mut y, w)?;
-        style.spinner.write(w)?;
-        write!(w, "{}", loading_text(state.frame))?;
+        next_field(&mut line, &style.label, state.header_layout);
+        line.text(&style.spinner, loading_text(state.frame));
     }
 
-    Ok(y + 1)
+    line.y() + 1
+}
+
+fn next_field(line: &mut LineWriter, label: &Style, layout: HeaderLayout) {
+    match layout {
+        HeaderLayout::SingleLine => line.spaces(label, 2),
+        HeaderLayout::MultiLine => line.next_line(),
+    }
 }
 
 fn render_file_tree(
-    w: &mut impl Write,
+    frame: &mut Frame,
     state: &mut State,
     theme: &Theme,
     ri: &RenderInfo,
     mut y: u16,
-) -> Result<()> {
+) {
     let is_scan_done = match ri.target_dir_state {
         FileState::Queued => false,
         FileState::Finished | FileState::Failed(_) => true,
@@ -364,25 +336,32 @@ fn render_file_tree(
 
     // Header
     let style = &theme.file_table;
-    let mut x = 0;
-    for col in &cols {
-        write!(w, "{}", cursor::MoveTo(x, y))?;
-        let header_style = match col {
-            Column::Progress => &style.progress_header,
-            Column::Name => &style.name_header,
-            Column::SizeAbs => &style.size_abs_header,
-            Column::SizeRel => &style.size_rel_header,
-            Column::SizeCur => &style.size_cur_header,
-            Column::ModTime => &style.modtime_header,
-        };
-        if col.right_aligned() {
-            let pad = col
-                .width(name_col_width)
-                .saturating_sub(col.header().len() as u16) as usize;
-            write!(w, "{}", " ".repeat(pad))?;
+    {
+        let mut line = frame.line(y);
+        let mut x = 0;
+        for (i, col) in cols.iter().enumerate() {
+            let header_style = match col {
+                Column::Progress => &style.progress_header,
+                Column::Name => &style.name_header,
+                Column::SizeAbs => &style.size_abs_header,
+                Column::SizeRel => &style.size_rel_header,
+                Column::SizeCur => &style.size_cur_header,
+                Column::ModTime => &style.modtime_header,
+            };
+            if i > 0 {
+                line.spaces_until(&Style::default(), x);
+            }
+            if col.right_aligned() {
+                line.spaces_until(
+                    &Style::default(),
+                    x + col
+                        .width(name_col_width)
+                        .saturating_sub(col.header().len() as u16),
+                );
+            }
+            line.text(header_style, col.header());
+            x += col.width(name_col_width) + COLUMN_GAP;
         }
-        header_style.write_text(w, col.header())?;
-        x += col.width(name_col_width) + COLUMN_GAP;
     }
 
     y += 1;
@@ -417,15 +396,17 @@ fn render_file_tree(
 
         // Paint the full row background first, so that selected and error rows are highlighted
         // across all cells and gaps.
+        let mut line = frame.line(y_cur);
         if highlighted {
-            write!(w, "{}", cursor::MoveTo(0, y_cur))?;
-            bg_style.write_spaces(w, row_width as usize)?;
+            line.background(&bg_style, row_width as usize);
         }
 
         let mut x = 0;
-        for col in &cols {
-            let width = col.width(name_col_width) as usize;
-            write!(w, "{}", cursor::MoveTo(x, y_cur))?;
+        for (k, col) in cols.iter().enumerate() {
+            let width = col.width(name_col_width);
+            if k > 0 {
+                line.spaces_until(&bg_style, x);
+            }
             match col {
                 Column::Progress => {
                     let state_str = match node.state {
@@ -433,13 +414,13 @@ fn render_file_tree(
                         FileState::Finished => " ",
                         FileState::Failed(_) => "E",
                     };
-                    style_mod(&style.progress_value).write_text(w, state_str)?;
+                    line.text(&style_mod(&style.progress_value), state_str);
                 }
                 Column::Name => {
                     let mut name = name
                         .to_string_lossy()
                         .chars()
-                        .take(width)
+                        .take(width as usize)
                         .collect::<String>();
                     if *is_dir {
                         name += "/";
@@ -451,91 +432,87 @@ fn render_file_tree(
                     } else {
                         &style.name_file_value
                     };
-                    style_mod(s).write_text(w, &name)?;
+                    line.text(&style_mod(s), &name);
                 }
                 Column::SizeAbs => {
                     let size_abs_str = bytes_to_str(*size);
-                    bg_style.write_spaces(w, width.saturating_sub(size_abs_str.len()))?;
-                    style_mod(&style.size_abs_value).write_text(w, &size_abs_str)?;
+                    line.spaces_until(
+                        &bg_style,
+                        x + width.saturating_sub(size_abs_str.len() as u16),
+                    );
+                    line.text(&style_mod(&style.size_abs_value), &size_abs_str);
                 }
                 Column::SizeRel => {
                     let abs_size_percent = (*size as f64 / ri.target_dir_size as f64) * 100.0;
                     let abs_size_percent_str = format!("{:6.2} %", abs_size_percent);
-                    bg_style.write_spaces(w, width.saturating_sub(abs_size_percent_str.len()))?;
-                    if let Some(s) = &style.size_rel_value {
-                        style_mod(s).write(w)?;
+                    line.spaces_until(
+                        &bg_style,
+                        x + width.saturating_sub(abs_size_percent_str.len() as u16),
+                    );
+                    let s = if let Some(s) = &style.size_rel_value {
+                        style_mod(s)
                     } else {
                         let mut s = bg_style.clone();
                         if !has_error {
                             s = s.fg(percent_to_color(abs_size_percent, theme));
                         }
-                        s.write(w)?;
-                    }
-                    write!(w, "{}", abs_size_percent_str)?;
-                    write!(w, "{}", style::ResetColor)?;
+                        s
+                    };
+                    line.text(&s, &abs_size_percent_str);
                 }
                 Column::SizeCur => {
                     let size_percent = (*size as f64 / ri.cur_dir_size as f64) * 100.0;
                     let size_percent_str = format!("{:6.2} %", size_percent);
-                    bg_style.write_spaces(w, width.saturating_sub(size_percent_str.len()))?;
-                    if let Some(s) = &style.size_cur_value {
-                        s.write(w)?;
+                    line.spaces_until(
+                        &bg_style,
+                        x + width.saturating_sub(size_percent_str.len() as u16),
+                    );
+                    let s = if let Some(s) = &style.size_cur_value {
+                        style_mod(s)
                     } else {
-                        bg_style
-                            .clone()
-                            .fg(percent_to_color(size_percent, theme))
-                            .write(w)?;
-                    }
-                    write!(w, "{}", size_percent_str)?;
-                    write!(w, "{}", style::ResetColor)?;
+                        bg_style.clone().fg(percent_to_color(size_percent, theme))
+                    };
+                    line.text(&s, &size_percent_str);
                 }
                 Column::ModTime => {
                     let last_modified = DateTime::<Local>::from(inode.last_modified);
-                    let s_val = format!("{}{}", ResetColor, style_mod(&style.modtime_value));
-                    let s_delim = format!("{}{}", ResetColor, style_mod(&style.modtime_delim));
-                    let last_modified = last_modified
-                        .format("%Y[-]%m[-]%d %H[:]%M[:]%S")
-                        .to_string()
-                        .replace("[", &s_delim)
-                        .replace("]", &s_val);
-                    write!(w, "{}", s_val)?;
-                    write!(w, "{}", last_modified)?;
-                    write!(w, "{}", style::ResetColor)?;
+                    let s_val = &style_mod(&style.modtime_value);
+                    let s_delim = &style_mod(&style.modtime_delim);
+                    line.text(s_val, &last_modified.format("%Y").to_string());
+                    line.text(s_delim, "-");
+                    line.text(s_val, &last_modified.format("%m").to_string());
+                    line.text(s_delim, "-");
+                    line.text(s_val, &last_modified.format("%d %H").to_string());
+                    line.text(s_delim, ":");
+                    line.text(s_val, &last_modified.format("%M").to_string());
+                    line.text(s_delim, ":");
+                    line.text(s_val, &last_modified.format("%S").to_string());
                 }
             }
-            x += col.width(name_col_width) + COLUMN_GAP;
+            x += width + COLUMN_GAP;
         }
     }
-
-    Ok(())
 }
 
-fn render_delete_dialog(
-    w: &mut impl Write,
-    theme: &Theme,
-    y: u16,
-    path_to_delete: &Path,
-) -> Result<()> {
+fn render_delete_dialog(frame: &mut Frame, theme: &Theme, y: u16, path_to_delete: &Path) {
     let style = &theme.delete_dialog;
-    write!(w, "{}", cursor::MoveTo(0, y))?;
-    style
-        .message
-        .write_text(w, "Delete the following file/directory?  [y/n]")?;
-    write!(w, "{}", cursor::MoveTo(2, y + 2))?;
-    style
-        .path
-        .write_text(w, path_to_delete.to_string_lossy().as_ref())?;
-
-    Ok(())
+    let mut line = frame.line(y);
+    line.text(
+        &style.message,
+        "Delete the following file/directory?  [y/n]",
+    );
+    let mut line = frame.line(y + 2);
+    line.spaces_until(&Style::default(), 2);
+    line.text(&style.path, path_to_delete.to_string_lossy().as_ref());
 }
 
 fn render_errors(
-    w: &mut impl Write,
+    frame: &mut Frame,
     state: &State,
     theme: &Theme,
     error_view: &ErrorView,
     mut y: u16,
-) -> Result<()> {
+) {
     let style = &theme.error_view;
 
     let width = state.term_size[0] as usize;
@@ -545,14 +522,17 @@ fn render_errors(
         .enumerate()
         .skip(error_view.cur_error_ix)
     {
-        write!(w, "{}", cursor::MoveTo(0, y))?;
-        style.index.write_text(w, &(i + 1).to_string())?;
-        write!(w, "{}", cursor::MoveTo(4, y))?;
-        style.path.write_text(w, &e.path)?;
+        {
+            let mut line = frame.line(y);
+            line.text(&style.index, &(i + 1).to_string());
+            line.spaces_until(&Style::default(), 4);
+            line.text(&style.path, &e.path);
+        }
         y += 1;
         for l in wrap_lines(&e.message, width.saturating_sub(4).max(10)) {
-            write!(w, "{}", cursor::MoveTo(4, y))?;
-            style.message.write_text(w, &l)?;
+            let mut line = frame.line(y);
+            line.spaces_until(&Style::default(), 4);
+            line.text(&style.message, &l);
             y += 1;
         }
         y += 1;
@@ -560,17 +540,9 @@ fn render_errors(
             break;
         }
     }
-
-    Ok(())
 }
 
-fn render_help_view(
-    w: &mut impl Write,
-    state: &State,
-    theme: &Theme,
-    help_view: &HelpView,
-    y: u16,
-) -> Result<()> {
+fn render_help_view(frame: &mut Frame, state: &State, theme: &Theme, help_view: &HelpView, y: u16) {
     let style = &theme.help_view;
 
     for (i, (keys, action, scope)) in HELP.iter().skip(help_view.cur_line_ix).enumerate() {
@@ -587,15 +559,16 @@ fn render_help_view(
         } else {
             (&style.keys, &style.action, &style.scope)
         };
-        write!(w, "{}", cursor::MoveTo(0, y))?;
-        s_keys.write_text(w, keys)?;
-        s_keys.write_spaces(w, state.help_meta.key_col_width + 2 - keys.len())?;
-        s_action.write_text(w, action)?;
-        s_action.write_spaces(w, state.help_meta.action_col_width + 2 - action.len())?;
-        s_scope.write_text(w, scope)?;
+        let mut line = frame.line(y);
+        line.text(s_keys, keys);
+        line.spaces(s_keys, state.help_meta.key_col_width + 2 - keys.len());
+        line.text(s_action, action);
+        line.spaces(
+            s_action,
+            state.help_meta.action_col_width + 2 - action.len(),
+        );
+        line.text(s_scope, scope);
     }
-
-    Ok(())
 }
 
 /// Wraps `input` into lines that are at most `max_line_length` chars long.

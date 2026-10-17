@@ -1,6 +1,7 @@
 pub mod args;
 pub mod config;
 pub mod file_tree;
+pub mod frame;
 pub mod help;
 pub mod motion;
 pub mod raw_mode;
