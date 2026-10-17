@@ -288,13 +288,7 @@ fn render_file_tree(
         style.progress_header.write_text(w, "S")?;
         write!(w, "  ")?;
     }
-    let name_col_width = i64::max(
-        8,
-        i64::min(
-            32,
-            state.term_size[0] as i64 - 46 - if is_scan_done { 0 } else { 3 },
-        ),
-    );
+    let name_col_width = state.name_col_width;
     style.name_header.write_text(w, "Name")?;
     write!(w, "  ")?;
     for _ in 0..name_col_width - 4 {

@@ -130,6 +130,7 @@ fn run() -> Result<()> {
         size_metric: config.default_size_metric,
         sort_dirs_before_files: true,
         show_size_cur_column: config.default_show_size_cur_column,
+        name_col_width: 32,
         display_mode: DisplayMode::FileTree,
         help_meta: HelpMeta::new(),
         status: None,
@@ -246,6 +247,8 @@ fn handle_key_event(state: &mut State, config: &Config, key_event: KeyEvent) -> 
                     state.show_size_cur_column = !state.show_size_cur_column;
                     true
                 }
+                KeyCode::Char('+') => state.adjust_name_col_width(1),
+                KeyCode::Char('-') => state.adjust_name_col_width(-1),
                 KeyCode::Char('e') => {
                     let file_tree = state.file_tree.lock().unwrap();
                     let children = sorted_entries(&file_tree, state);
@@ -496,6 +499,7 @@ pub struct State {
     pub size_metric: SizeMetric,
     pub sort_dirs_before_files: bool,
     pub show_size_cur_column: bool,
+    pub name_col_width: i64,
     pub display_mode: DisplayMode,
     pub help_meta: HelpMeta,
     pub header_layout: HeaderLayout,
@@ -524,6 +528,22 @@ impl State {
         let height = self.term_size[1] as usize - 3;
         let i = self.cur_subdir_entry_ix_mut();
         motion.apply_check(i, num_entries, height)
+    }
+
+    pub fn adjust_name_col_width(&mut self, delta: i64) -> bool {
+        let adjusted = if delta >= 0 {
+            self.name_col_width + delta
+        } else {
+            self.name_col_width
+                .saturating_sub_unsigned(delta.unsigned_abs())
+        };
+        let new = adjusted.max(8);
+        if new == self.name_col_width {
+            false
+        } else {
+            self.name_col_width = new;
+            true
+        }
     }
 
     pub fn cur_entry(&self) -> Option<(OsString, Inode)> {
