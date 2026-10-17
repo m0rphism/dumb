@@ -31,7 +31,7 @@ size_max_color = [1.0, 0.2, 0.2]
   # - `path_prefix` applies to the directory specified via CLI arguments.
   # - `path_suffix` applies to everything that comes afterwards.
   path_prefix = { fg = [0.4, 0.5, 1.0] }
-  path_suffix = { fg = [1.0, 0.4, 0.5] }
+  path_suffix = { fg = [0.75, 0.5, 1.0] }
   
   # Styles for the size display:
   # - `size_current` is only visible if the user navigated into a subdirectory, and displays the total size
@@ -40,7 +40,7 @@ size_max_color = [1.0, 0.2, 0.2]
   # - `size_percent` applies to the size percentage display in parentheses.
   #    Defaults to using a color between `size_min_color` and
   #    `size_max_color` depending on percentage.
-  size_current = { fg = [1.0, 0.4, 0.5] }
+  size_current = { fg = [0.75, 0.5, 1.0] }
   size_total   = { fg = [0.4, 0.5, 1.0] }
   #size_percent = null
   
@@ -51,7 +51,7 @@ size_max_color = [1.0, 0.2, 0.2]
   size_metric = { fg = [0.4, 0.5, 1.0] }
 
   # Style for the scan error count (only displayed if there are actually errors).
-  error = { fg = [1.0, 0.0, 0.0] }
+  error = { fg = [1.0, 0.5, 0.5] }
 
   # Style for the progress spinner (only displayed during scanning).
   spinner = {}
@@ -89,15 +89,15 @@ size_max_color = [1.0, 0.2, 0.2]
 
   # The style for the currently selected row. This style is merged with the styles for the
   # individual cells (`*_value` styles), where the fields of `selected_row` take precedence.
-  selected_row = { bg = [0.1, 0.1, 0.1] }
+  selected_row = { bg = [0.2, 0.2, 0.2] }
 
   # Same mechanics as `selected_row`, but used for entries with errors, i.e.
   # where the entry itself or one of its transitive children could not be
   # scanned because of e.g. permission errors.
-  error_row = { fg = [1.0, 0.2, 0.2], bg = [0.2, 0.0, 0.0] }
+  error_row = { fg = [1.0, 0.5, 0.5] }
 
   # Same mechanics as `selected_row`, but used for entries that are selected and have errors.
-  selected_error_row = { fg = [1.0, 0.4, 0.4], bg = [0.4, 0.0, 0.0] }
+  selected_error_row = { fg = [1.0, 0.5, 0.5], bg = [0.2, 0.2, 0.2] }
 
 # Style of the error view, which displays scan errors when pressing `e` or `E`.
 [error_view]

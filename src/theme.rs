@@ -26,37 +26,41 @@ pub struct Theme {
     pub size_max_color: Color,
 }
 
+const C1: [f32; 3] = [0.4, 0.5, 1.0];
+const C2: [f32; 3] = [0.75, 0.5, 1.0];
+const C3: [f32; 3] = [1.0, 0.5, 0.5];
+
 #[serde_inline_default]
 #[derive(Clone, Debug, Deserialize)]
 pub struct Header {
     #[serde_inline_default(Style::default())]
     pub label: Style,
 
-    #[serde_inline_default(Style::default().fg([0.4, 0.5, 1.0]))]
+    #[serde_inline_default(Style::default().fg(C1))]
     pub path_prefix: Style,
 
-    #[serde_inline_default(Style::default().fg([1.0, 0.4, 0.5]))]
+    #[serde_inline_default(Style::default().fg(C2))]
     pub path_suffix: Style,
 
-    #[serde_inline_default(Style::default().fg([1.0, 0.4, 0.5]))]
+    #[serde_inline_default(Style::default().fg(C2))]
     pub size_current: Style,
 
-    #[serde_inline_default(Style::default().fg([0.4, 0.5, 1.0]))]
+    #[serde_inline_default(Style::default().fg(C1))]
     pub size_total: Style,
 
     /// Defaults to using a color between {`size_min_color`] and [`size_max_color`] depending on percentage.
     #[serde_inline_default(None)]
     pub size_percent: Option<Style>,
 
-    #[serde_inline_default(Style::default().fg([0.4, 0.5, 1.0]))]
+    #[serde_inline_default(Style::default().fg(C1))]
     pub sort_mode: Style,
 
     /// Style of the size metric indicator (e.g. `[freed]`) displayed after
     /// the size.
-    #[serde_inline_default(Style::default().fg([0.4, 0.5, 1.0]))]
+    #[serde_inline_default(Style::default().fg(C1))]
     pub size_metric: Style,
 
-    #[serde_inline_default(Style::default().fg([1.0, 0.0, 0.0]))]
+    #[serde_inline_default(Style::default().fg(C3))]
     pub error: Style,
 
     #[serde_inline_default(Style::default())]
@@ -113,13 +117,13 @@ pub struct FileTable {
     #[serde_inline_default(Style::default().fg([0.5, 0.5, 0.5]))]
     pub modtime_delim: Style,
 
-    #[serde_inline_default(Style::default().bg([0.1, 0.1, 0.1]))]
+    #[serde_inline_default(Style::default().bg([0.2, 0.2, 0.2]))]
     pub selected_row: Style,
 
-    #[serde_inline_default(Style::default().fg([1.0, 0.2, 0.2]).bg([0.2, 0.0, 0.0]))]
+    #[serde_inline_default(Style::default().fg(C3))]
     pub error_row: Style,
 
-    #[serde_inline_default(Style::default().fg([1.0, 0.4, 0.4]).bg([0.4, 0.0, 0.0]))]
+    #[serde_inline_default(Style::default().fg(C3).bg([0.2, 0.2, 0.2]))]
     pub selected_error_row: Style,
 }
 
