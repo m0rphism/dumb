@@ -42,7 +42,7 @@ pub struct Inode {
 pub enum ScanEvent {
     StartedScan(PathBuf, InodeId, Inode),
     FinishedScan(PathBuf, InodeId),
-    FailedScan(PathBuf, String),
+    Error(PathBuf, String),
 }
 
 impl ScanEvent {
@@ -50,7 +50,7 @@ impl ScanEvent {
         match self {
             ScanEvent::StartedScan(path, _, _) => f(path),
             ScanEvent::FinishedScan(path, _) => f(path),
-            ScanEvent::FailedScan(path, _) => f(path),
+            ScanEvent::Error(path, _) => f(path),
         }
     }
 }
@@ -84,7 +84,7 @@ fn scan_(
     let meta = match symlink_metadata(path) {
         Ok(meta) => meta,
         Err(e) => {
-            on_event(ScanEvent::FailedScan(
+            on_event(ScanEvent::Error(
                 path.to_path_buf(),
                 format!("Cannot read metadata:\n{e}"),
             ))?;
@@ -95,7 +95,7 @@ fn scan_(
     let last_modified = match meta.modified() {
         Ok(t) => t,
         Err(e) => {
-            on_event(ScanEvent::FailedScan(
+            on_event(ScanEvent::Error(
                 path.to_path_buf(),
                 format!("Cannot read modtime (using UNIX_EPOCH instead):\n{e}"),
             ))?;
@@ -128,7 +128,7 @@ fn scan_(
         let iter = match path.read_dir() {
             Ok(iter) => iter,
             Err(e) => {
-                on_event(ScanEvent::FailedScan(
+                on_event(ScanEvent::Error(
                     path.to_path_buf(),
                     format!("Cannot read directory contents:\n{e}"),
                 ))?;
@@ -139,7 +139,7 @@ fn scan_(
             let e = match e {
                 Ok(e) => e,
                 Err(e) => {
-                    on_event(ScanEvent::FailedScan(
+                    on_event(ScanEvent::Error(
                         path.to_path_buf(),
                         format!("Cannot read directory entry:\n{e}"),
                     ))?;

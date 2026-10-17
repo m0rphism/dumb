@@ -248,7 +248,7 @@ impl FileTree {
                     node.state = FileState::Finished;
                 }
             }
-            ScanEvent::FailedScan(path, err) => {
+            ScanEvent::Error(path, err) => {
                 if self.is_deleted_path(&path) {
                     return;
                 }
