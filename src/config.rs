@@ -24,6 +24,12 @@ pub struct Config {
     #[serde_inline_default(true)]
     pub default_show_size_cur_column: bool,
 
+    #[serde_inline_default(0)]
+    pub default_name_column_width: u64,
+
+    #[serde_inline_default(0)]
+    pub max_name_column_width: u64,
+
     #[serde_inline_default(true)]
     pub enable_delete_binding: bool,
 

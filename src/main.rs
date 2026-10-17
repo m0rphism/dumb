@@ -27,11 +27,11 @@ use crossterm::{
 use crate::{
     args::Args,
     config::{Config, HeaderLayout, SizeMetric, SortBy},
-    file_tree::FileTree,
+    file_tree::{FileState, FileTree},
     help::{HELP, HelpMeta},
     motion::Motion,
     raw_mode::RawMode,
-    render::{render_state, sorted_entries},
+    render::{other_columns_width, render_state, sorted_entries},
     scan::{Inode, scan},
     theme::Theme,
 };
@@ -130,7 +130,13 @@ fn run() -> Result<()> {
         size_metric: config.default_size_metric,
         sort_dirs_before_files: true,
         show_size_cur_column: config.default_show_size_cur_column,
-        name_col_width: 32,
+        // A width of 0 means auto width, see State::auto_name_col_width.
+        name_col_width: if config.default_name_column_width == 0 {
+            0
+        } else {
+            config.default_name_column_width.max(4) as i64
+        },
+        max_name_column_width: config.max_name_column_width as i64,
         display_mode: DisplayMode::FileTree,
         help_meta: HelpMeta::new(),
         status: None,
@@ -500,6 +506,8 @@ pub struct State {
     pub sort_dirs_before_files: bool,
     pub show_size_cur_column: bool,
     pub name_col_width: i64,
+    /// Maximum width chosen by the auto Name column width; 0 means no maximum.
+    pub max_name_column_width: i64,
     pub display_mode: DisplayMode,
     pub help_meta: HelpMeta,
     pub header_layout: HeaderLayout,
@@ -530,14 +538,40 @@ impl State {
         motion.apply_check(i, num_entries, height)
     }
 
-    pub fn adjust_name_col_width(&mut self, delta: i64) -> bool {
-        let adjusted = if delta >= 0 {
-            self.name_col_width + delta
+    pub fn is_scan_done(&self) -> bool {
+        !matches!(self.file_tree.lock().unwrap().root.state, FileState::Queued)
+    }
+
+    pub fn show_size_cur(&self) -> bool {
+        self.show_size_cur_column && !self.cur_subdir.to_string_lossy().is_empty()
+    }
+
+    pub fn auto_name_col_width(&self) -> i64 {
+        let leftover = self.term_size[0] as i64
+            - other_columns_width(self.is_scan_done(), self.show_size_cur());
+        let w = if self.max_name_column_width > 0 {
+            leftover.min(self.max_name_column_width)
         } else {
-            self.name_col_width
-                .saturating_sub_unsigned(delta.unsigned_abs())
+            leftover
         };
-        let new = adjusted.max(8);
+        w.max(4)
+    }
+
+    pub fn adjust_name_col_width(&mut self, delta: i64) -> bool {
+        let auto = self.auto_name_col_width();
+        let adjusted = if self.name_col_width == 0 {
+            // Switch from auto to a fixed width.
+            auto + delta
+        } else {
+            self.name_col_width + delta
+        };
+        let adjusted = adjusted.max(4);
+        let new = if adjusted == auto {
+            // Switch from fixed width to auto width.
+            0
+        } else {
+            adjusted
+        };
         if new == self.name_col_width {
             false
         } else {

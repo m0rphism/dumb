@@ -156,6 +156,18 @@ pub struct RenderInfo {
     pub num_errors: usize,
 }
 
+pub fn other_columns_width(is_scan_done: bool, show_size_cur: bool) -> i64 {
+    // TODO: This is absolutely horrifying. We need a proper layout abstraction for the table rendering.
+    let mut w = 2 + 10 + 2 + 8 + 2 + 19;
+    if show_size_cur {
+        w += 8 + 2;
+    }
+    if !is_scan_done {
+        w += 3;
+    }
+    w
+}
+
 fn render_header<W: Write>(
     w: &mut W,
     state: &State,
@@ -278,8 +290,7 @@ fn render_file_tree(
     };
     // The Size Cur column is only relevant in a subdirectory and can be
     // toggled with `c`.
-    let show_size_cur =
-        state.show_size_cur_column && !state.cur_subdir.to_string_lossy().is_empty();
+    let show_size_cur = state.show_size_cur();
 
     // File View Header
     write!(w, "{}", cursor::MoveTo(0, y))?;
@@ -288,7 +299,12 @@ fn render_file_tree(
         style.progress_header.write_text(w, "S")?;
         write!(w, "  ")?;
     }
-    let name_col_width = state.name_col_width;
+    // A width of 0 means auto width.
+    let name_col_width = if state.name_col_width > 0 {
+        state.name_col_width
+    } else {
+        state.auto_name_col_width()
+    };
     style.name_header.write_text(w, "Name")?;
     write!(w, "  ")?;
     for _ in 0..name_col_width - 4 {

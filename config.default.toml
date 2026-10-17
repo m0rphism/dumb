@@ -28,6 +28,17 @@ default_size_metric = "freed"
 # Can be toggled at runtime by pressing `c`.
 default_show_size_cur_column = true
 
+# Initial width of the Name column in the file tree.
+# 0 means that the column automatically takes the leftover terminal width
+# after all other columns. Can be changed at runtime with `+` and `-`, which
+# also switch between auto width and a fixed width.
+default_name_column_width = 0
+
+# Maximum width chosen by the auto Name column width (i.e. if
+# default_name_column_width is 0). 0 means no maximum. The user can still
+# increase the column beyond this maximum with `+`.
+max_name_column_width = 0
+
 # Enable the delete keybinding, which allows removing the selected directory
 # entry recursively when pressing `d`.
 enable_delete_binding = true
