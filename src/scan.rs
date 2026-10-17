@@ -138,8 +138,11 @@ fn scan_(
         for e in iter {
             let e = match e {
                 Ok(e) => e,
-                Err(_e) => {
-                    // TODO
+                Err(e) => {
+                    on_event(ScanEvent::FailedScan(
+                        path.to_path_buf(),
+                        format!("Cannot read directory entry:\n{e}"),
+                    ))?;
                     continue;
                 }
             };
