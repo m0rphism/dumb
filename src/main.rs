@@ -41,12 +41,13 @@ use crate::{
 };
 
 fn main() -> ExitCode {
+    RawMode::set_panic_hook();
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             let err_str = format!("{e:?}");
-            eprintln!("{}", err_str);
-            std::fs::write("dumb.log", &err_str).unwrap();
+            let _ = std::fs::write("dumb.log", &err_str);
+            eprintln!("{err_str}");
             ExitCode::FAILURE
         }
     }
@@ -59,8 +60,9 @@ fn run() -> Result<()> {
 
     let root_dir = match args.root_dir {
         Some(path) => path,
-        None => std::env::current_dir()
-            .context("Failed to determine the current working directory.")?,
+        None => {
+            std::env::current_dir().context("Failed to determine the current working directory.")?
+        }
     };
 
     let file_tree = Arc::new(Mutex::new(FileTree::new(&root_dir)?));
