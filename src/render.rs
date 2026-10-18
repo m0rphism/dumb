@@ -264,19 +264,23 @@ fn render_header(frame: &mut Frame, state: &State, theme: &Theme, ri: &RenderInf
         let root_dir_size_str = bytes_to_str(ri.root_dir_size);
         line.text(&style.size_total, &root_dir_size_str);
     } else {
-        let size_percent = (ri.cur_dir_size as f64 / ri.root_dir_size as f64) * 100.0;
         let root_dir_size_str = bytes_to_str(ri.root_dir_size);
         let cur_dir_size_str = bytes_to_str(ri.cur_dir_size);
         line.text(&style.size_current, &cur_dir_size_str);
         line.text(&style.label, " / ");
         line.text(&style.size_total, &root_dir_size_str);
         line.text(&style.label, " (");
-        let percent_str = format!("{size_percent:.2} %");
-        if let Some(s) = &style.size_percent {
-            line.text(s, &percent_str);
-        } else {
-            let s = Style::default().fg(percent_to_color(size_percent, theme));
-            line.text(&s, &percent_str);
+        match ratio_to_percent(ri.cur_dir_size, ri.root_dir_size) {
+            Some(size_percent) => {
+                let percent_str = format!("{size_percent:.2} %");
+                if let Some(s) = &style.size_percent {
+                    line.text(s, &percent_str);
+                } else {
+                    let s = Style::default().fg(percent_to_color(size_percent, theme));
+                    line.text(&s, &percent_str);
+                }
+            }
+            None => line.text(&style.label, "-"),
         }
         line.text(&style.label, ")");
     }
@@ -454,8 +458,11 @@ fn render_file_tree(
                     line.text(&style_mod(&style.size_abs_value), &size_abs_str);
                 }
                 Column::SizeRel => {
-                    let abs_size_percent = (e.size as f64 / ri.root_dir_size as f64) * 100.0;
-                    let abs_size_percent_str = format!("{:6.2} %", abs_size_percent);
+                    let abs_size_percent = ratio_to_percent(e.size, ri.root_dir_size);
+                    let abs_size_percent_str = match abs_size_percent {
+                        Some(p) => format!("{p:6.2} %"),
+                        None => "       -".to_string(),
+                    };
                     line.spaces_until(
                         &bg_style,
                         x + width.saturating_sub(abs_size_percent_str.len() as u16),
@@ -464,16 +471,21 @@ fn render_file_tree(
                         style_mod(s)
                     } else {
                         let mut s = bg_style.clone();
-                        if !has_error {
-                            s = s.fg(percent_to_color(abs_size_percent, theme));
+                        if let Some(p) = abs_size_percent
+                            && !has_error
+                        {
+                            s = s.fg(percent_to_color(p, theme));
                         }
                         s
                     };
                     line.text(&s, &abs_size_percent_str);
                 }
                 Column::SizeCur => {
-                    let size_percent = (e.size as f64 / ri.cur_dir_size as f64) * 100.0;
-                    let size_percent_str = format!("{:6.2} %", size_percent);
+                    let size_percent = ratio_to_percent(e.size, ri.cur_dir_size);
+                    let size_percent_str = match size_percent {
+                        Some(p) => format!("{p:6.2} %"),
+                        None => "       -".to_string(),
+                    };
                     line.spaces_until(
                         &bg_style,
                         x + width.saturating_sub(size_percent_str.len() as u16),
@@ -481,7 +493,11 @@ fn render_file_tree(
                     let s = if let Some(s) = &style.size_cur_value {
                         style_mod(s)
                     } else {
-                        bg_style.clone().fg(percent_to_color(size_percent, theme))
+                        let mut s = bg_style.clone();
+                        if let Some(p) = size_percent {
+                            s = s.fg(percent_to_color(p, theme));
+                        }
+                        s
                     };
                     line.text(&s, &size_percent_str);
                 }
@@ -668,6 +684,10 @@ pub fn loading_text(i: usize) -> &'static str {
         5 => ".. .",
         _ => unreachable!(),
     }
+}
+
+pub fn ratio_to_percent(numerator: u64, denominator: u64) -> Option<f64> {
+    (denominator > 0).then(|| numerator as f64 / denominator as f64 * 100.0)
 }
 
 pub fn percent_to_color(f: f64, theme: &Theme) -> [f32; 3] {
