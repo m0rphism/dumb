@@ -138,6 +138,7 @@ fn run() -> Result<()> {
         frame: 0,
         header_layout: config.default_header_layout,
         display_mode: DisplayMode::FileTree,
+        help_return_mode: DisplayMode::FileTree,
         help_meta: HelpMeta::new(),
         status: None,
     };
@@ -334,6 +335,7 @@ fn handle_key_event(state: &mut State, config: &Config, key_event: KeyEvent) -> 
                     true
                 }
                 KeyCode::Char('?') => {
+                    state.help_return_mode = DisplayMode::FileTree;
                     state.display_mode = DisplayMode::HelpView(HelpView::default());
                     true
                 }
@@ -371,6 +373,7 @@ fn handle_key_event(state: &mut State, config: &Config, key_event: KeyEvent) -> 
                     error_view.apply_motion(Motion::HalfPageUp)
                 }
                 KeyCode::Char('?') => {
+                    state.help_return_mode = DisplayMode::ErrorView(error_view.clone());
                     state.display_mode = DisplayMode::HelpView(HelpView::default());
                     true
                 }
@@ -378,7 +381,7 @@ fn handle_key_event(state: &mut State, config: &Config, key_event: KeyEvent) -> 
             },
             DisplayMode::HelpView(help_view) => match key_event.code {
                 KeyCode::Char('q') | KeyCode::Char('?') => {
-                    state.display_mode = DisplayMode::FileTree;
+                    state.display_mode = state.help_return_mode.clone();
                     true
                 }
                 KeyCode::Char('j') | KeyCode::Down => help_view.apply_motion(Motion::Down, &layout),
@@ -660,6 +663,9 @@ pub struct State {
     /// Determines what is currently rendered (e.g. file tree view or help view), and
     /// correspondingly also which keybindings are active.
     pub display_mode: DisplayMode,
+    /// The display mode that the help view was opened from, which is restored when the help view
+    /// is closed. Only meaningful while the help view is displayed.
+    pub help_return_mode: DisplayMode,
     /// Cached data for rendering the help view.
     pub help_meta: HelpMeta,
     /// How the header should be rendered.
