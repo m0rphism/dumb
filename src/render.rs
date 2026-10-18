@@ -31,14 +31,17 @@ pub fn sorted_entries<'a>(
     file_tree: &'a FileTree,
     state: &State,
 ) -> Vec<(&'a OsString, &'a FileNode, Inode, bool, u64)> {
-    let children = &file_tree.get(&state.cur_subdir).unwrap().children;
+    let children = &file_tree.get(&state.file_view.cur_subdir).unwrap().children;
     let mut children = children
         .iter()
         .map(|(name, node)| {
-            let path = state.target_path.join(&state.cur_subdir).join(name);
+            let path = state
+                .target_path
+                .join(&state.file_view.cur_subdir)
+                .join(name);
             let is_dir = path.is_dir() && !path.is_symlink();
             let inode = *file_tree.inodes.get(&node.inode_id).unwrap();
-            let size = match state.size_metric {
+            let size = match state.file_view.size_metric {
                 SizeMetric::Naive => {
                     if inode.is_dir {
                         node.naive_size
@@ -59,10 +62,10 @@ pub fn sorted_entries<'a>(
             (name, node, inode, is_dir, size)
         })
         .collect::<Vec<_>>();
-    match state.sort_by {
+    match state.file_view.sort_by {
         SortBy::Name => {
             children.sort_by_key(|(name, _node, _inode, is_dir, _size)| {
-                let is_file = !*is_dir && state.sort_dirs_before_files;
+                let is_file = !*is_dir && state.file_view.sort_dirs_before_files;
                 (is_file, *name)
             });
         }
@@ -93,12 +96,15 @@ pub fn render_state(stdout: &mut Stdout, state: &State, theme: &Theme) -> Result
 
     let render_info = {
         let file_tree = state.file_tree.lock().unwrap();
-        let size_of = |n: &FileNode| match state.size_metric {
+        let size_of = |n: &FileNode| match state.file_view.size_metric {
             SizeMetric::Freed => n.freed_size,
             SizeMetric::Naive => n.naive_size,
         };
         RenderInfo {
-            cur_dir_size: file_tree.get(&state.cur_subdir).map(size_of).unwrap_or(0),
+            cur_dir_size: file_tree
+                .get(&state.file_view.cur_subdir)
+                .map(size_of)
+                .unwrap_or(0),
             target_dir_size: size_of(&file_tree.root),
             target_dir_state: file_tree.root.state.clone(),
             num_errors: file_tree.errors.len(),
@@ -229,7 +235,7 @@ fn render_header(frame: &mut Frame, state: &State, theme: &Theme, ri: &RenderInf
 
     // Current Directory
     let prefix_str = state.target_path.to_string_lossy();
-    let suffix_str = state.cur_subdir.to_string_lossy();
+    let suffix_str = state.file_view.cur_subdir.to_string_lossy();
 
     if state.header_layout == HeaderLayout::MultiLine {
         line.text(&style.label, "Cur Dir:  ");
@@ -243,7 +249,7 @@ fn render_header(frame: &mut Frame, state: &State, theme: &Theme, ri: &RenderInf
     if state.header_layout == HeaderLayout::MultiLine {
         line.text(&style.label, "Size:     ");
     }
-    if state.cur_subdir.to_string_lossy().is_empty() {
+    if state.file_view.cur_subdir.to_string_lossy().is_empty() {
         let target_size_str = bytes_to_str(ri.target_dir_size);
         line.text(&style.size_total, &target_size_str);
     } else {
@@ -264,7 +270,7 @@ fn render_header(frame: &mut Frame, state: &State, theme: &Theme, ri: &RenderInf
         line.text(&style.label, ")");
     }
     line.text(&style.label, " [");
-    line.text(&style.size_metric, state.size_metric.as_str());
+    line.text(&style.size_metric, state.file_view.size_metric.as_str());
     line.text(&style.label, "]");
     next_field(&mut line, &style.label, state.header_layout);
 
@@ -273,7 +279,7 @@ fn render_header(frame: &mut Frame, state: &State, theme: &Theme, ri: &RenderInf
         HeaderLayout::SingleLine => line.text(&style.label, "Sort by "),
         HeaderLayout::MultiLine => line.text(&style.label, "Sort by:  "),
     }
-    line.text(&style.sort_mode, &format!("{:?}", state.sort_by));
+    line.text(&style.sort_mode, &format!("{:?}", state.file_view.sort_by));
 
     // Errors
     if ri.num_errors > 0 {
@@ -321,11 +327,13 @@ fn render_file_tree(
         FileState::Queued => false,
         FileState::Finished | FileState::Failed(_) => true,
     };
-    let show_size_cur = state.show_size_cur();
-    let name_col_width = if state.name_col_width > 0 {
-        state.name_col_width
+    let show_size_cur = state.file_view.show_size_cur();
+    let name_col_width = if state.file_view.name_col_width > 0 {
+        state.file_view.name_col_width
     } else {
-        state.auto_name_col_width()
+        state
+            .file_view
+            .auto_name_col_width(state.term_size[0] as i64, state.is_scan_done())
     } as u16;
     let cols = table_columns(is_scan_done, show_size_cur);
 
@@ -364,7 +372,7 @@ fn render_file_tree(
     let children = sorted_entries(&file_tree, state);
     let skip = i64::max(
         0,
-        state.cur_subdir_entry_ix() as i64 - (layout.num_content_lines() as i64 / 2),
+        state.file_view.cur_subdir_entry_ix() as i64 - (layout.num_content_lines() as i64 / 2),
     ) as usize;
     let row_width = columns_width(&cols, name_col_width);
     for (j, (i, (name, node, inode, is_dir, size))) in
@@ -374,7 +382,7 @@ fn render_file_tree(
         if y_cur > layout.content_bottom_line() {
             break;
         }
-        let is_selected = i == state.cur_subdir_entry_ix();
+        let is_selected = i == state.file_view.cur_subdir_entry_ix();
         let has_error = node.num_child_errors > 0 || matches!(node.state, FileState::Failed(_));
         let highlighted = is_selected || has_error;
 

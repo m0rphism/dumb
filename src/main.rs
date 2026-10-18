@@ -123,24 +123,12 @@ fn run() -> Result<()> {
     // state.cur_subdir_entries.sort();
     let mut state = State {
         file_tree,
-        cur_subdir: PathBuf::new(),
-        cur_subdir_entry_ixs: vec![0],
+        file_view: FileView::new(&config),
         target_path,
         term_size,
         layout: Layout::new(term_size, 1),
         frame: 0,
-        sort_by: config.default_sort_mode,
         header_layout: config.default_header_layout,
-        size_metric: config.default_size_metric,
-        sort_dirs_before_files: true,
-        show_size_cur_column: config.default_show_size_cur_column,
-        // A width of 0 means auto width, see State::auto_name_col_width.
-        name_col_width: if config.default_name_column_width == 0 {
-            0
-        } else {
-            config.default_name_column_width.max(4) as i64
-        },
-        max_name_column_width: config.max_name_column_width as i64,
         display_mode: DisplayMode::FileTree,
         help_meta: HelpMeta::new(),
         status: None,
@@ -191,60 +179,67 @@ fn handle_key_event(state: &mut State, config: &Config, key_event: KeyEvent) -> 
         match &mut state.display_mode {
             DisplayMode::FileTree => match key_event.code {
                 KeyCode::Char('q') => return None,
-                KeyCode::Char('j') | KeyCode::Down => state.apply_motion(Motion::Down, &layout),
-                KeyCode::Char('k') | KeyCode::Up => state.apply_motion(Motion::Up, &layout),
-                KeyCode::Char('h') | KeyCode::Left => {
-                    if let Some(p) = state.cur_subdir.parent() {
-                        state.cur_subdir = p.to_path_buf();
-                        state.cur_subdir_entry_ixs.pop();
-                        if state.cur_subdir_entry_ixs.is_empty() {
-                            state.cur_subdir_entry_ixs.push(0)
-                        }
-                        true
-                    } else {
-                        false
-                    }
+                KeyCode::Char('j') | KeyCode::Down => state.file_view.apply_motion(
+                    Motion::Down,
+                    state.cur_subdir_entry_len(),
+                    &layout,
+                ),
+                KeyCode::Char('k') | KeyCode::Up => {
+                    state
+                        .file_view
+                        .apply_motion(Motion::Up, state.cur_subdir_entry_len(), &layout)
                 }
+                KeyCode::Char('h') | KeyCode::Left => state.file_view.leave_subdir(),
                 KeyCode::Char('l') | KeyCode::Right => {
-                    let redraw = {
-                        let ix = state.cur_subdir_entry_ix();
-                        let file_tree = state.file_tree.lock().unwrap();
-                        let entries = sorted_entries(&file_tree, state);
-                        if let Some((cur_name, _node, _inode, _is_dir @ true, _)) = entries.get(ix)
-                        {
-                            state.cur_subdir = state.cur_subdir.join(cur_name);
+                    let file_tree = state.file_tree.lock().unwrap();
+                    let entries = sorted_entries(&file_tree, state);
+                    match entries.get(state.file_view.cur_subdir_entry_ix()) {
+                        Some((cur_name, _, _, true, _)) => {
+                            state.file_view.enter_subdir(cur_name);
                             true
-                        } else {
-                            false
                         }
-                    };
-                    if redraw {
-                        state.cur_subdir_entry_ixs.push(0);
+                        _ => false,
                     }
-                    redraw
                 }
-                KeyCode::Char('g') | KeyCode::Home => state.apply_motion(Motion::First, &layout),
-                KeyCode::Char('G') | KeyCode::End => state.apply_motion(Motion::Last, &layout),
-                KeyCode::Char('f') if key_event.modifiers == KeyModifiers::CONTROL => {
-                    state.apply_motion(Motion::PageDown, &layout)
-                }
-                KeyCode::PageDown => state.apply_motion(Motion::PageDown, &layout),
-                KeyCode::Char('b') if key_event.modifiers == KeyModifiers::CONTROL => {
-                    state.apply_motion(Motion::PageUp, &layout)
-                }
-                KeyCode::PageUp => state.apply_motion(Motion::PageUp, &layout),
-                KeyCode::Char('d') if key_event.modifiers == KeyModifiers::CONTROL => {
-                    state.apply_motion(Motion::HalfPageDown, &layout)
-                }
-                KeyCode::Char('u') if key_event.modifiers == KeyModifiers::CONTROL => {
-                    state.apply_motion(Motion::HalfPageUp, &layout)
-                }
+                KeyCode::Char('g') | KeyCode::Home => state.file_view.apply_motion(
+                    Motion::First,
+                    state.cur_subdir_entry_len(),
+                    &layout,
+                ),
+                KeyCode::Char('G') | KeyCode::End => state.file_view.apply_motion(
+                    Motion::Last,
+                    state.cur_subdir_entry_len(),
+                    &layout,
+                ),
+                KeyCode::Char('f') if key_event.modifiers == KeyModifiers::CONTROL => state
+                    .file_view
+                    .apply_motion(Motion::PageDown, state.cur_subdir_entry_len(), &layout),
+                KeyCode::PageDown => state.file_view.apply_motion(
+                    Motion::PageDown,
+                    state.cur_subdir_entry_len(),
+                    &layout,
+                ),
+                KeyCode::Char('b') if key_event.modifiers == KeyModifiers::CONTROL => state
+                    .file_view
+                    .apply_motion(Motion::PageUp, state.cur_subdir_entry_len(), &layout),
+                KeyCode::PageUp => state.file_view.apply_motion(
+                    Motion::PageUp,
+                    state.cur_subdir_entry_len(),
+                    &layout,
+                ),
+                KeyCode::Char('d') if key_event.modifiers == KeyModifiers::CONTROL => state
+                    .file_view
+                    .apply_motion(Motion::HalfPageDown, state.cur_subdir_entry_len(), &layout),
+                KeyCode::Char('u') if key_event.modifiers == KeyModifiers::CONTROL => state
+                    .file_view
+                    .apply_motion(Motion::HalfPageUp, state.cur_subdir_entry_len(), &layout),
                 KeyCode::Char('s') => {
-                    state.sort_by = state.sort_by.next();
+                    state.file_view.sort_by = state.file_view.sort_by.next();
                     true
                 }
                 KeyCode::Char('S') => {
-                    state.sort_dirs_before_files = !state.sort_dirs_before_files;
+                    state.file_view.sort_dirs_before_files =
+                        !state.file_view.sort_dirs_before_files;
                     true
                 }
                 KeyCode::Char('L') => {
@@ -252,20 +247,30 @@ fn handle_key_event(state: &mut State, config: &Config, key_event: KeyEvent) -> 
                     true
                 }
                 KeyCode::Char('m') => {
-                    state.size_metric = state.size_metric.next();
+                    state.file_view.size_metric = state.file_view.size_metric.next();
                     true
                 }
                 KeyCode::Char('c') => {
-                    state.show_size_cur_column = !state.show_size_cur_column;
+                    state.file_view.show_size_cur_column = !state.file_view.show_size_cur_column;
                     true
                 }
-                KeyCode::Char('+') => state.adjust_name_col_width(1),
-                KeyCode::Char('-') => state.adjust_name_col_width(-1),
+                KeyCode::Char('+') => state.file_view.adjust_name_col_width(
+                    1,
+                    state.term_size[0] as i64,
+                    state.is_scan_done(),
+                ),
+                KeyCode::Char('-') => state.file_view.adjust_name_col_width(
+                    -1,
+                    state.term_size[0] as i64,
+                    state.is_scan_done(),
+                ),
                 KeyCode::Char('e') => {
                     let file_tree = state.file_tree.lock().unwrap();
                     let children = sorted_entries(&file_tree, state);
-                    if let Some((name, _, _, _, _)) = children.get(state.cur_subdir_entry_ix()) {
-                        let cur_path = state.cur_subdir.join(name);
+                    if let Some((name, _, _, _, _)) =
+                        children.get(state.file_view.cur_subdir_entry_ix())
+                    {
+                        let cur_path = state.file_view.cur_subdir.join(name);
                         let errors: Vec<_> = file_tree
                             .errors
                             .iter()
@@ -465,6 +470,122 @@ pub enum DisplayMode {
     DeleteDialog(PathBuf),
 }
 
+/// The state of the file tree view: the currently viewed subdirectory, the selection within it,
+/// and the view's display options.
+#[derive(Debug, Clone)]
+pub struct FileView {
+    /// The current subdirectory selected in the file tree view. Relative to [`State::target_path`].
+    pub cur_subdir: PathBuf,
+    /// The stack of file tree entry indexes. The last entry of the stack represents the index for
+    /// the currently selected file tree entry in [`FileView::cur_subdir`].
+    pub cur_subdir_entry_ixs: Vec<usize>,
+    /// How the file tree view is sorted.
+    pub sort_by: SortBy,
+    /// The size-metric with which the entries of the file tree are displayed.
+    pub size_metric: SizeMetric,
+    /// Whether the file tree view should sort directories before files (only relevant for [`SortBy::Name`].
+    pub sort_dirs_before_files: bool,
+    /// Whether to display the "Size Cur" column in the file tree view (only relevant if the file
+    /// tree view is currently in a subdirectory of [`State::target_path`].
+    pub show_size_cur_column: bool,
+    /// The width of the name column in the file tree view. If set to 0, the name column is
+    /// auto-sized, i.e. it fills the entire left-over width from the other columns.
+    pub name_col_width: i64,
+    /// Maximum width chosen when auto-sizing the "Name" column width. 0 means no maximum.
+    pub max_name_column_width: i64,
+}
+
+impl FileView {
+    pub fn new(config: &Config) -> Self {
+        Self {
+            cur_subdir: PathBuf::new(),
+            cur_subdir_entry_ixs: vec![0],
+            sort_by: config.default_sort_mode,
+            size_metric: config.default_size_metric,
+            sort_dirs_before_files: true,
+            show_size_cur_column: config.default_show_size_cur_column,
+            name_col_width: if config.default_name_column_width == 0 {
+                0
+            } else {
+                config.default_name_column_width.max(4) as i64
+            },
+            max_name_column_width: config.max_name_column_width as i64,
+        }
+    }
+
+    pub fn cur_subdir_entry_ix(&self) -> usize {
+        *self.cur_subdir_entry_ixs.last().unwrap()
+    }
+    pub fn cur_subdir_entry_ix_mut(&mut self) -> &mut usize {
+        self.cur_subdir_entry_ixs.last_mut().unwrap()
+    }
+
+    pub fn enter_subdir(&mut self, name: &OsString) {
+        self.cur_subdir = self.cur_subdir.join(name);
+        self.cur_subdir_entry_ixs.push(0);
+    }
+
+    pub fn leave_subdir(&mut self) -> bool {
+        match self.cur_subdir.parent() {
+            Some(p) => {
+                self.cur_subdir = p.to_path_buf();
+                self.cur_subdir_entry_ixs.pop();
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Apply the motion to the file list and return true iff the motion actually changed the
+    /// selected entry.
+    pub fn apply_motion(&mut self, motion: Motion, num_entries: usize, layout: &Layout) -> bool {
+        let i = self.cur_subdir_entry_ix_mut();
+        motion.apply_check(i, num_entries, layout.num_file_list_lines() as usize)
+    }
+
+    pub fn show_size_cur(&self) -> bool {
+        self.show_size_cur_column && !self.cur_subdir.to_string_lossy().is_empty()
+    }
+
+    pub fn auto_name_col_width(&self, term_width: i64, is_scan_done: bool) -> i64 {
+        let leftover = term_width - fixed_columns_width(is_scan_done, self.show_size_cur());
+        let w = if self.max_name_column_width > 0 {
+            leftover.min(self.max_name_column_width)
+        } else {
+            leftover
+        };
+        w.max(4)
+    }
+
+    pub fn adjust_name_col_width(
+        &mut self,
+        delta: i64,
+        term_width: i64,
+        is_scan_done: bool,
+    ) -> bool {
+        let auto = self.auto_name_col_width(term_width, is_scan_done);
+        let adjusted = if self.name_col_width == 0 {
+            // Switch from auto to a fixed width.
+            auto + delta
+        } else {
+            self.name_col_width + delta
+        };
+        let adjusted = adjusted.max(4);
+        let new = if adjusted == auto {
+            // Switch from fixed width to auto width.
+            0
+        } else {
+            adjusted
+        };
+        if new == self.name_col_width {
+            false
+        } else {
+            self.name_col_width = new;
+            true
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct HelpView {
     pub cur_line_ix: usize,
@@ -520,11 +641,8 @@ pub struct State {
     /// The file tree of the root directory. This is accessible by the main thread while it is being
     /// built by the scan thread.
     pub file_tree: Arc<Mutex<FileTree>>,
-    /// The current subdirectory selected in the file tree view. Relative to [`State::target_path`].
-    pub cur_subdir: PathBuf,
-    /// The stack of file tree entry indexes. The last entry of the stack represents the index for
-    /// the currently selected file tree entry in [`State::cur_subdir`].
-    pub cur_subdir_entry_ixs: Vec<usize>,
+    /// The state of the file tree view.
+    pub file_view: FileView,
     /// The current terminal size.
     pub term_size: [u16; 2],
     /// The layout of a rendered frame.
@@ -533,20 +651,6 @@ pub struct State {
     pub layout: Layout,
     /// The current frame index. Used to render the spinner during scanning.
     pub frame: usize,
-    /// How the file tree view is sorted.
-    pub sort_by: SortBy,
-    /// The size-metric with which the entries of the file tree are displayed.
-    pub size_metric: SizeMetric,
-    /// Whether the file tree view should sort directories before files (only relevant for [`SortBy::Name`].
-    pub sort_dirs_before_files: bool,
-    /// Whether to display the "Size Cur" column in the file tree view (only relevant if the file
-    /// tree view is currently in a subdirectory of [`State::target_path`].
-    pub show_size_cur_column: bool,
-    /// The width of the name column in the file tree view. If set to 0, the name column is
-    /// auto-sized, i.e. it fills the entire left-over width from the other columns.
-    pub name_col_width: i64,
-    /// Maximum width chosen when auto-sizing the "Name" column width. 0 means no maximum.
-    pub max_name_column_width: i64,
     /// Determines what is currently rendered (e.g. file tree view or help view), and
     /// correspondingly also which keybindings are active.
     pub display_mode: DisplayMode,
@@ -559,72 +663,21 @@ pub struct State {
 }
 
 impl State {
-    pub fn cur_subdir_entry_ix(&self) -> usize {
-        *self.cur_subdir_entry_ixs.last().unwrap()
-    }
-    pub fn cur_subdir_entry_ix_mut(&mut self) -> &mut usize {
-        self.cur_subdir_entry_ixs.last_mut().unwrap()
-    }
     pub fn cur_subdir_entry_len(&self) -> usize {
         self.file_tree
             .lock()
             .unwrap()
-            .get(&self.cur_subdir)
+            .get(&self.file_view.cur_subdir)
             .map(|node| node.children.len())
             .unwrap_or(0)
-    }
-    /// Apply the motion to the file list and return true iff the motion actually changed the
-    /// selected entry.
-    pub fn apply_motion(&mut self, motion: Motion, layout: &Layout) -> bool {
-        let num_entries = self.cur_subdir_entry_len();
-        let i = self.cur_subdir_entry_ix_mut();
-        motion.apply_check(i, num_entries, layout.num_file_list_lines() as usize)
     }
 
     pub fn is_scan_done(&self) -> bool {
         !matches!(self.file_tree.lock().unwrap().root.state, FileState::Queued)
     }
 
-    pub fn show_size_cur(&self) -> bool {
-        self.show_size_cur_column && !self.cur_subdir.to_string_lossy().is_empty()
-    }
-
-    pub fn auto_name_col_width(&self) -> i64 {
-        let leftover = self.term_size[0] as i64
-            - fixed_columns_width(self.is_scan_done(), self.show_size_cur());
-        let w = if self.max_name_column_width > 0 {
-            leftover.min(self.max_name_column_width)
-        } else {
-            leftover
-        };
-        w.max(4)
-    }
-
-    pub fn adjust_name_col_width(&mut self, delta: i64) -> bool {
-        let auto = self.auto_name_col_width();
-        let adjusted = if self.name_col_width == 0 {
-            // Switch from auto to a fixed width.
-            auto + delta
-        } else {
-            self.name_col_width + delta
-        };
-        let adjusted = adjusted.max(4);
-        let new = if adjusted == auto {
-            // Switch from fixed width to auto width.
-            0
-        } else {
-            adjusted
-        };
-        if new == self.name_col_width {
-            false
-        } else {
-            self.name_col_width = new;
-            true
-        }
-    }
-
     pub fn cur_entry(&self) -> Option<(OsString, Inode)> {
-        let ix = self.cur_subdir_entry_ix();
+        let ix = self.file_view.cur_subdir_entry_ix();
         let file_tree = self.file_tree.lock().unwrap();
         sorted_entries(&file_tree, self)
             .into_iter()
@@ -635,7 +688,7 @@ impl State {
     /// Target-relative path of the currently selected entry.
     pub fn cur_entry_path(&self) -> Option<PathBuf> {
         let (name, _) = self.cur_entry()?;
-        Some(self.cur_subdir.join(&name))
+        Some(self.file_view.cur_subdir.join(&name))
     }
 
     pub fn try_delete(&mut self, rel: &Path) {
@@ -663,7 +716,7 @@ impl State {
         // Make sure that the selection index of the entry list is still in bounds.
         // This might not be the case if the last entry was deleted.
         let len = self.cur_subdir_entry_len();
-        let ix = self.cur_subdir_entry_ix_mut();
+        let ix = self.file_view.cur_subdir_entry_ix_mut();
         if *ix >= len {
             *ix = len.saturating_sub(1);
         }
