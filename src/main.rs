@@ -193,7 +193,7 @@ fn handle_key_event(state: &mut State, config: &Config, key_event: KeyEvent) -> 
                 KeyCode::Char('l') | KeyCode::Right => {
                     let file_tree = state.file_tree.lock().unwrap();
                     let entries = sorted_entries(&file_tree, state);
-                    match entries.get(state.file_view.cur_subdir_entry_ix()) {
+                    match entries.get(state.file_view.cur_entry_ix()) {
                         Some((cur_name, _, _, true, _)) => {
                             state.file_view.enter_subdir(cur_name);
                             true
@@ -267,9 +267,7 @@ fn handle_key_event(state: &mut State, config: &Config, key_event: KeyEvent) -> 
                 KeyCode::Char('e') => {
                     let file_tree = state.file_tree.lock().unwrap();
                     let children = sorted_entries(&file_tree, state);
-                    if let Some((name, _, _, _, _)) =
-                        children.get(state.file_view.cur_subdir_entry_ix())
-                    {
+                    if let Some((name, _, _, _, _)) = children.get(state.file_view.cur_entry_ix()) {
                         let cur_path = state.file_view.cur_subdir.join(name);
                         let errors: Vec<_> = file_tree
                             .errors
@@ -478,7 +476,7 @@ pub struct FileView {
     pub cur_subdir: PathBuf,
     /// The stack of file tree entry indexes. The last entry of the stack represents the index for
     /// the currently selected file tree entry in [`FileView::cur_subdir`].
-    pub cur_subdir_entry_ixs: Vec<usize>,
+    pub entry_ixs: Vec<usize>,
     /// How the file tree view is sorted.
     pub sort_by: SortBy,
     /// The size-metric with which the entries of the file tree are displayed.
@@ -499,7 +497,7 @@ impl FileView {
     pub fn new(config: &Config) -> Self {
         Self {
             cur_subdir: PathBuf::new(),
-            cur_subdir_entry_ixs: vec![0],
+            entry_ixs: vec![0],
             sort_by: config.default_sort_mode,
             size_metric: config.default_size_metric,
             sort_dirs_before_files: true,
@@ -513,23 +511,23 @@ impl FileView {
         }
     }
 
-    pub fn cur_subdir_entry_ix(&self) -> usize {
-        *self.cur_subdir_entry_ixs.last().unwrap()
+    pub fn cur_entry_ix(&self) -> usize {
+        *self.entry_ixs.last().unwrap()
     }
-    pub fn cur_subdir_entry_ix_mut(&mut self) -> &mut usize {
-        self.cur_subdir_entry_ixs.last_mut().unwrap()
+    pub fn cur_entry_ix_mut(&mut self) -> &mut usize {
+        self.entry_ixs.last_mut().unwrap()
     }
 
     pub fn enter_subdir(&mut self, name: &OsString) {
         self.cur_subdir = self.cur_subdir.join(name);
-        self.cur_subdir_entry_ixs.push(0);
+        self.entry_ixs.push(0);
     }
 
     pub fn leave_subdir(&mut self) -> bool {
         match self.cur_subdir.parent() {
             Some(p) => {
                 self.cur_subdir = p.to_path_buf();
-                self.cur_subdir_entry_ixs.pop();
+                self.entry_ixs.pop();
                 true
             }
             None => false,
@@ -539,7 +537,7 @@ impl FileView {
     /// Apply the motion to the file list and return true iff the motion actually changed the
     /// selected entry.
     pub fn apply_motion(&mut self, motion: Motion, num_entries: usize, layout: &Layout) -> bool {
-        let i = self.cur_subdir_entry_ix_mut();
+        let i = self.cur_entry_ix_mut();
         motion.apply_check(i, num_entries, layout.num_file_list_lines() as usize)
     }
 
@@ -677,7 +675,7 @@ impl State {
     }
 
     pub fn cur_entry(&self) -> Option<(OsString, Inode)> {
-        let ix = self.file_view.cur_subdir_entry_ix();
+        let ix = self.file_view.cur_entry_ix();
         let file_tree = self.file_tree.lock().unwrap();
         sorted_entries(&file_tree, self)
             .into_iter()
@@ -716,7 +714,7 @@ impl State {
         // Make sure that the selection index of the entry list is still in bounds.
         // This might not be the case if the last entry was deleted.
         let len = self.cur_subdir_entry_len();
-        let ix = self.file_view.cur_subdir_entry_ix_mut();
+        let ix = self.file_view.cur_entry_ix_mut();
         if *ix >= len {
             *ix = len.saturating_sub(1);
         }

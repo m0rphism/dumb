@@ -372,7 +372,7 @@ fn render_file_tree(
     let children = sorted_entries(&file_tree, state);
     let skip = i64::max(
         0,
-        state.file_view.cur_subdir_entry_ix() as i64 - (layout.num_content_lines() as i64 / 2),
+        state.file_view.cur_entry_ix() as i64 - (layout.num_content_lines() as i64 / 2),
     ) as usize;
     let row_width = columns_width(&cols, name_col_width);
     for (j, (i, (name, node, inode, is_dir, size))) in
@@ -382,7 +382,7 @@ fn render_file_tree(
         if y_cur > layout.content_bottom_line() {
             break;
         }
-        let is_selected = i == state.file_view.cur_subdir_entry_ix();
+        let is_selected = i == state.file_view.cur_entry_ix();
         let has_error = node.num_child_errors > 0 || matches!(node.state, FileState::Failed(_));
         let highlighted = is_selected || has_error;
 
