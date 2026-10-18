@@ -15,6 +15,7 @@ use std::{
     io::stdout,
     os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
+    process::ExitCode,
     sync::{Arc, Mutex, mpsc::channel},
     time::Duration,
 };
@@ -39,11 +40,15 @@ use crate::{
     theme::Theme,
 };
 
-fn main() {
-    if let Err(e) = run() {
-        let err_str = format!("{e:?}");
-        eprintln!("{}", err_str);
-        std::fs::write("dumb.log", &err_str).unwrap();
+fn main() -> ExitCode {
+    match run() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            let err_str = format!("{e:?}");
+            eprintln!("{}", err_str);
+            std::fs::write("dumb.log", &err_str).unwrap();
+            ExitCode::FAILURE
+        }
     }
 }
 
