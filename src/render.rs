@@ -92,30 +92,32 @@ pub fn render_state(stdout: &mut Stdout, state: &State, theme: &Theme) -> Result
     // Flickering shouldn't be an issue if stdout is only flushed at the end, but for some reason
     // it is...
     let mut frame = Frame::new();
+
     frame.clear();
 
-    let render_info = {
-        let file_tree = state.file_tree.lock().unwrap();
-        let size_of = |n: &FileNode| match state.file_view.size_metric {
-            SizeMetric::Freed => n.freed_size,
-            SizeMetric::Naive => n.naive_size,
-        };
-        RenderInfo {
-            cur_dir_size: file_tree
-                .get(&state.file_view.cur_subdir)
-                .map(size_of)
-                .unwrap_or(0),
-            target_dir_size: size_of(&file_tree.root),
-            target_dir_state: file_tree.root.state.clone(),
-            num_errors: file_tree.errors.len(),
-        }
+    // The file tree is locked for the whole frame so that the header and the file list are
+    // rendered from the same snapshot.
+    let file_tree = state.file_tree.lock().unwrap();
+
+    let size_of = |n: &FileNode| match state.file_view.size_metric {
+        SizeMetric::Freed => n.freed_size,
+        SizeMetric::Naive => n.naive_size,
+    };
+    let render_info = RenderInfo {
+        cur_dir_size: file_tree
+            .get(&state.file_view.cur_subdir)
+            .map(size_of)
+            .unwrap_or(0),
+        target_dir_size: size_of(&file_tree.root),
+        target_dir_state: file_tree.root.state.clone(),
+        num_errors: file_tree.errors.len(),
     };
 
     let header_height = render_header(&mut frame, state, theme, &render_info);
     let layout = Layout::new(state.term_size, header_height);
     match &state.display_mode {
         DisplayMode::FileTree => {
-            render_file_tree(&mut frame, state, theme, &render_info, &layout);
+            render_file_tree(&mut frame, &file_tree, state, theme, &render_info, &layout);
         }
         DisplayMode::ErrorView(error_view) => {
             render_errors(&mut frame, state, theme, error_view, &layout);
@@ -318,6 +320,7 @@ fn next_field(line: &mut LineWriter, label: &Style, layout: HeaderLayout) {
 
 fn render_file_tree(
     frame: &mut Frame,
+    file_tree: &FileTree,
     state: &State,
     theme: &Theme,
     ri: &RenderInfo,
@@ -333,7 +336,7 @@ fn render_file_tree(
     } else {
         state
             .file_view
-            .auto_name_col_width(state.term_size[0] as i64, state.is_scan_done())
+            .auto_name_col_width(state.term_size[0] as i64, is_scan_done)
     } as u16;
     let cols = table_columns(is_scan_done, show_size_cur);
 
@@ -368,8 +371,7 @@ fn render_file_tree(
     }
 
     // Rows
-    let file_tree = state.file_tree.lock().unwrap();
-    let children = sorted_entries(&file_tree, state);
+    let children = sorted_entries(file_tree, state);
     let skip = i64::max(
         0,
         state.file_view.cur_entry_ix() as i64 - (layout.num_content_lines() as i64 / 2),
