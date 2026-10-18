@@ -52,32 +52,31 @@ fn run() -> Result<()> {
 
     let (config, theme) = load_config_and_theme(&args.config)?;
 
-    let target_path = args
-        .target
+    let root_dir = args
+        .root_dir
         .unwrap_or_else(|| std::env::current_dir().unwrap());
 
-    let file_tree = Arc::new(Mutex::new(FileTree::new(&target_path)));
+    let file_tree = Arc::new(Mutex::new(FileTree::new(&root_dir)));
 
     let (sender, receiver) = channel();
     let (done_sender, done_receiver) = channel();
 
-    // Spawn thread that scans the `target_path`.
+    // Spawn thread that scans the `root_dir`.
     let _scan_handle = std::thread::spawn({
         let file_tree = file_tree.clone();
-        let target_path = target_path.clone();
+        let root_dir = root_dir.clone();
         move || -> Result<()> {
             scan(
-                &target_path,
+                &root_dir,
                 |mut scan_event| -> Result<()> {
                     let mut file_tree = file_tree.lock().unwrap();
-                    scan_event.map_path_bufs(|p| {
-                        *p = p.strip_prefix(&target_path).unwrap().to_path_buf()
-                    });
+                    scan_event
+                        .map_path_bufs(|p| *p = p.strip_prefix(&root_dir).unwrap().to_path_buf());
                     file_tree.handle_scan_event(scan_event);
                     Ok(())
                 },
                 |p: &Path| {
-                    let rel = p.strip_prefix(&target_path).unwrap_or(p);
+                    let rel = p.strip_prefix(&root_dir).unwrap_or(p);
                     file_tree.lock().unwrap().is_deleted_path(rel)
                 },
             )?;
@@ -116,7 +115,7 @@ fn run() -> Result<()> {
         [w, h]
     };
 
-    // cur_subdir_entries: target_path
+    // cur_subdir_entries: root_dir
     //     .read_dir()?
     //     .filter_map(|e| e.ok().map(|e| e.file_name()))
     //     .collect(),
@@ -124,7 +123,7 @@ fn run() -> Result<()> {
     let mut state = State {
         file_tree,
         file_view: FileView::new(&config),
-        target_path,
+        root_dir,
         term_size,
         layout: Layout::new(term_size, 1),
         frame: 0,
@@ -464,7 +463,7 @@ pub enum DisplayMode {
     FileTree,
     ErrorView(ErrorView),
     HelpView(HelpView),
-    /// Target-relative path of the entry to delete.
+    /// `root_dir`-relative path of the entry to delete.
     DeleteDialog(PathBuf),
 }
 
@@ -472,7 +471,7 @@ pub enum DisplayMode {
 /// and the view's display options.
 #[derive(Debug, Clone)]
 pub struct FileView {
-    /// The current subdirectory selected in the file tree view. Relative to [`State::target_path`].
+    /// The current subdirectory selected in the file tree view. Relative to [`State::root_dir`].
     pub cur_subdir: PathBuf,
     /// The stack of file tree entry indexes. The last entry of the stack represents the index for
     /// the currently selected file tree entry in [`FileView::cur_subdir`].
@@ -484,7 +483,7 @@ pub struct FileView {
     /// Whether the file tree view should sort directories before files (only relevant for [`SortBy::Name`].
     pub sort_dirs_before_files: bool,
     /// Whether to display the "Size Cur" column in the file tree view (only relevant if the file
-    /// tree view is currently in a subdirectory of [`State::target_path`].
+    /// tree view is currently in a subdirectory of [`State::root_dir`].
     pub show_size_cur_column: bool,
     /// The width of the name column in the file tree view. If set to 0, the name column is
     /// auto-sized, i.e. it fills the entire left-over width from the other columns.
@@ -635,7 +634,7 @@ pub enum ErrorViewMode {
 #[derive(Debug)]
 pub struct State {
     /// The root directory to scan recursively.
-    pub target_path: PathBuf,
+    pub root_dir: PathBuf,
     /// The file tree of the root directory. This is accessible by the main thread while it is being
     /// built by the scan thread.
     pub file_tree: Arc<Mutex<FileTree>>,
@@ -683,21 +682,21 @@ impl State {
             .map(|entry| (entry.name.clone(), entry.inode))
     }
 
-    /// Target-relative path of the currently selected entry.
+    /// `root_dir`-relative path of the currently selected entry.
     pub fn cur_entry_path(&self) -> Option<PathBuf> {
         let (name, _) = self.cur_entry()?;
         Some(self.file_view.cur_subdir.join(&name))
     }
 
     pub fn try_delete(&mut self, rel: &Path) {
-        let target = self.target_path.clone();
-        let abs = target.join(rel);
+        let root_dir = self.root_dir.clone();
+        let abs = root_dir.join(rel);
         if let Err(e) = remove_file_or_dir(&abs) {
             self.status = Some(format!("Failed to delete {abs:?}: {e}"));
             return;
         }
         let stat_nlink = |p: &Path| {
-            std::fs::symlink_metadata(target.join(p))
+            std::fs::symlink_metadata(root_dir.join(p))
                 .ok()
                 .map(|m| m.nlink())
         };

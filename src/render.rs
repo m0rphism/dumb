@@ -47,10 +47,7 @@ pub fn sorted_entries<'a>(file_tree: &'a FileTree, state: &State) -> Vec<FileEnt
     let mut children = children
         .iter()
         .map(|(name, node)| {
-            let path = state
-                .target_path
-                .join(&state.file_view.cur_subdir)
-                .join(name);
+            let path = state.root_dir.join(&state.file_view.cur_subdir).join(name);
             let is_dir = path.is_dir() && !path.is_symlink();
             let inode = *file_tree.inodes.get(&node.inode_id).unwrap();
             let size = match state.file_view.size_metric {
@@ -120,8 +117,8 @@ pub fn render_state(stdout: &mut Stdout, state: &State, theme: &Theme) -> Result
             .get(&state.file_view.cur_subdir)
             .map(size_of)
             .unwrap_or(0),
-        target_dir_size: size_of(&file_tree.root),
-        target_dir_state: file_tree.root.state.clone(),
+        root_dir_size: size_of(&file_tree.root),
+        root_dir_state: file_tree.root.state.clone(),
         num_errors: file_tree.errors.len(),
     };
 
@@ -138,7 +135,7 @@ pub fn render_state(stdout: &mut Stdout, state: &State, theme: &Theme) -> Result
             render_help_view(&mut frame, state, theme, help_view, &layout);
         }
         DisplayMode::DeleteDialog(target) => {
-            render_delete_dialog(&mut frame, theme, &layout, &state.target_path.join(target));
+            render_delete_dialog(&mut frame, theme, &layout, &state.root_dir.join(target));
         }
     };
 
@@ -158,8 +155,8 @@ pub fn render_state(stdout: &mut Stdout, state: &State, theme: &Theme) -> Result
 
 pub struct RenderInfo {
     pub cur_dir_size: u64,
-    pub target_dir_size: u64,
-    pub target_dir_state: FileState,
+    pub root_dir_size: u64,
+    pub root_dir_state: FileState,
     pub num_errors: usize,
 }
 
@@ -175,7 +172,7 @@ pub enum Column {
     Name,
     /// Absolute size of the entry.
     SizeAbs,
-    /// Size of the entry relative to the scan target.
+    /// Size of the entry relative to the total size of the root directory.
     SizeRel,
     /// Size of the entry relative to the current directory.
     SizeCur,
@@ -248,7 +245,7 @@ fn render_header(frame: &mut Frame, state: &State, theme: &Theme, ri: &RenderInf
     let mut line = frame.line(0);
 
     // Current Directory
-    let prefix_str = state.target_path.to_string_lossy();
+    let prefix_str = state.root_dir.to_string_lossy();
     let suffix_str = state.file_view.cur_subdir.to_string_lossy();
 
     if state.header_layout == HeaderLayout::MultiLine {
@@ -264,15 +261,15 @@ fn render_header(frame: &mut Frame, state: &State, theme: &Theme, ri: &RenderInf
         line.text(&style.label, "Size:     ");
     }
     if state.file_view.cur_subdir.to_string_lossy().is_empty() {
-        let target_size_str = bytes_to_str(ri.target_dir_size);
-        line.text(&style.size_total, &target_size_str);
+        let root_dir_size_str = bytes_to_str(ri.root_dir_size);
+        line.text(&style.size_total, &root_dir_size_str);
     } else {
-        let size_percent = (ri.cur_dir_size as f64 / ri.target_dir_size as f64) * 100.0;
-        let target_size_str = bytes_to_str(ri.target_dir_size);
+        let size_percent = (ri.cur_dir_size as f64 / ri.root_dir_size as f64) * 100.0;
+        let root_dir_size_str = bytes_to_str(ri.root_dir_size);
         let cur_dir_size_str = bytes_to_str(ri.cur_dir_size);
         line.text(&style.size_current, &cur_dir_size_str);
         line.text(&style.label, " / ");
-        line.text(&style.size_total, &target_size_str);
+        line.text(&style.size_total, &root_dir_size_str);
         line.text(&style.label, " (");
         let percent_str = format!("{size_percent:.2} %");
         if let Some(s) = &style.size_percent {
@@ -315,7 +312,7 @@ fn render_header(frame: &mut Frame, state: &State, theme: &Theme, ri: &RenderInf
     }
 
     // Spinner
-    if matches!(ri.target_dir_state, FileState::Queued) {
+    if matches!(ri.root_dir_state, FileState::Queued) {
         next_field(&mut line, &style.label, state.header_layout);
         line.text(&style.spinner, loading_text(state.frame));
     }
@@ -338,7 +335,7 @@ fn render_file_tree(
     ri: &RenderInfo,
     layout: &Layout,
 ) {
-    let is_scan_done = match ri.target_dir_state {
+    let is_scan_done = match ri.root_dir_state {
         FileState::Queued => false,
         FileState::Finished | FileState::Failed(_) => true,
     };
@@ -457,7 +454,7 @@ fn render_file_tree(
                     line.text(&style_mod(&style.size_abs_value), &size_abs_str);
                 }
                 Column::SizeRel => {
-                    let abs_size_percent = (e.size as f64 / ri.target_dir_size as f64) * 100.0;
+                    let abs_size_percent = (e.size as f64 / ri.root_dir_size as f64) * 100.0;
                     let abs_size_percent_str = format!("{:6.2} %", abs_size_percent);
                     line.spaces_until(
                         &bg_style,

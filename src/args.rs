@@ -16,5 +16,5 @@ pub struct Args {
 
     /// Directory or file to calculate disk usage for.
     #[arg(value_name = "PATH")]
-    pub target: Option<PathBuf>,
+    pub root_dir: Option<PathBuf>,
 }

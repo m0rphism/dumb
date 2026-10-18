@@ -16,7 +16,7 @@ use crate::scan::{Inode, InodeId, ScanEvent};
 /// - To properly account for hardlinks, every file inode contributes at most once, at the deepest
 ///   common ancestor of all of its paths.
 ///   When a name is deleted, the contribution moves down to the lowest common ancestor of the
-///   remaining paths (no contribution if that ancestor is outside of the target dir), or disappears
+///   remaining paths (no contribution if that ancestor is outside of the root dir), or disappears
 ///   if the inode itself is deleted.
 #[derive(Debug, Clone)]
 pub struct FileTree {
@@ -33,7 +33,7 @@ pub struct FileTree {
     pub deleted_paths: Vec<PathBuf>,
     /// Maps inodes with multiple paths (hardlinks) to their paths and place of contribution. Kept
     /// for the whole session so that on deletions of one path the size contributions of the other
-    /// paths can be adjusted without having to retraverse the entire target directory.
+    /// paths can be adjusted without having to retraverse the entire root directory.
     pub linked: HashMap<InodeId, LinkRecord>,
 }
 
@@ -258,11 +258,11 @@ impl FileTree {
         }
     }
 
-    /// Delete the subtree at `path` (relative to the scan target) from the tree and update all
+    /// Delete the subtree at `path` (relative to the root directory) from the tree and update all
     /// size bookkeeping if necessary (deleted hardlinks may influence the freed size metric of
     /// other links to the same inode).
     ///
-    /// `stat_nlink` is queried with a target-relative path to refresh the link count of a surviving
+    /// `stat_nlink` is queried with a root-dir-relative path to refresh the link count of a surviving
     /// path of an incomplete multi-path inode. It should return `None` if the path cannot be
     /// resolved.
     ///
