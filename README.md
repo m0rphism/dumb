@@ -42,11 +42,6 @@ Useful for exploring what eats up all that disk space.
   Pressing `E` displays all errors. Pressing `e` on a file entry displays only
   the errors that occured while scanning this particular entry.
 
-- **Cross-Platform.**
-  While I have only tested the tool on linux, it should also run on Windows/MacOS.
-  If you have tried it on a non-linux platform, I'd be happy if you could open
-  an Issue to let me know whether it worked.
-
 ## Contributing
 
 I am generally open for contributions, but ask that you adhere to a single rule:
@@ -58,6 +53,7 @@ Pure slop issues/pull requests might be closed without any response.
 
 ## Limitations
 
+- Unix-only as `std::os::unix::fs::MetadataExt` is used.
 - Files deleted outside of the `dumb` process are not detected.
 - The `freed` size of an entry is computed from its allocated blocks
   (`st_blocks`, like `du`) and can slightly differ from the space that deleting
