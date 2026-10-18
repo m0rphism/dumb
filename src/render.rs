@@ -386,7 +386,7 @@ fn render_header(frame: &mut Frame, state: &State, theme: &Theme, ri: &RenderInf
     // Spinner
     if matches!(ri.root_dir_state, FileState::Queued) {
         next_field(&mut line, &style.label, state.header_layout);
-        line.text(&style.spinner, loading_text(state.frame));
+        line.text(&style.spinner, loading_text(state.spinner_frame));
     }
 
     line.y() + 1

@@ -135,7 +135,7 @@ fn run() -> Result<()> {
         root_dir,
         term_size,
         layout: Layout::new(term_size, 1),
-        frame: 0,
+        spinner_frame: 0,
         header_layout: config.default_header_layout,
         display_mode: DisplayMode::FileTree,
         help_return_mode: DisplayMode::FileTree,
@@ -147,7 +147,6 @@ fn run() -> Result<()> {
     let mut stdout = stdout();
     let _raw_mode = RawMode::enter()?;
     state.layout = render_state(&mut stdout, &state, &mut sorted_cache, &theme)?;
-    state.frame += 1;
 
     for event in receiver {
         // println!("Received: {event:?}");
@@ -169,11 +168,13 @@ fn run() -> Result<()> {
                 }
                 _ => false,
             },
-            Event::Redraw => true,
+            Event::Redraw => {
+                state.spinner_frame += 1;
+                true
+            }
         };
         if redraw {
             state.layout = render_state(&mut stdout, &state, &mut sorted_cache, &theme)?;
-            state.frame += 1;
         }
     }
 
@@ -667,8 +668,8 @@ pub struct State {
     /// This is produced during rendering by [`crate::render::render_state`]
     /// such that layout dependent actions, e.g. the "PageDown" keybinding, can refer to it.
     pub layout: Layout,
-    /// The current frame index. Used to render the spinner during scanning.
-    pub frame: usize,
+    /// The current frame of the spinner animation. Incremented by the redraw thread.
+    pub spinner_frame: usize,
     /// Determines what is currently rendered (e.g. file tree view or help view), and
     /// correspondingly also which keybindings are active.
     pub display_mode: DisplayMode,
