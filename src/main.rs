@@ -515,22 +515,46 @@ pub enum ErrorViewMode {
 
 #[derive(Debug)]
 pub struct State {
+    /// The root directory to scan recursively.
     pub target_path: PathBuf,
+    /// The file tree of the root directory. This is accessible by the main thread while it is being
+    /// built by the scan thread.
     pub file_tree: Arc<Mutex<FileTree>>,
+    /// The current subdirectory selected in the file tree view. Relative to [`State::target_path`].
     pub cur_subdir: PathBuf,
+    /// The stack of file tree entry indexes. The last entry of the stack represents the index for
+    /// the currently selected file tree entry in [`State::cur_subdir`].
     pub cur_subdir_entry_ixs: Vec<usize>,
+    /// The current terminal size.
     pub term_size: [u16; 2],
+    /// The layout of a rendered frame.
+    /// This is produced during rendering by [`crate::render::render_state`]
+    /// such that layout dependent actions, e.g. the "PageDown" keybinding, can refer to it.
     pub layout: Layout,
+    /// The current frame index. Used to render the spinner during scanning.
     pub frame: usize,
+    /// How the file tree view is sorted.
     pub sort_by: SortBy,
+    /// The size-metric with which the entries of the file tree are displayed.
     pub size_metric: SizeMetric,
+    /// Whether the file tree view should sort directories before files (only relevant for [`SortBy::Name`].
     pub sort_dirs_before_files: bool,
+    /// Whether to display the "Size Cur" column in the file tree view (only relevant if the file
+    /// tree view is currently in a subdirectory of [`State::target_path`].
     pub show_size_cur_column: bool,
+    /// The width of the name column in the file tree view. If set to 0, the name column is
+    /// auto-sized, i.e. it fills the entire left-over width from the other columns.
     pub name_col_width: i64,
+    /// Maximum width chosen when auto-sizing the "Name" column width. 0 means no maximum.
     pub max_name_column_width: i64,
+    /// Determines what is currently rendered (e.g. file tree view or help view), and
+    /// correspondingly also which keybindings are active.
     pub display_mode: DisplayMode,
+    /// Cached data for rendering the help view.
     pub help_meta: HelpMeta,
+    /// How the header should be rendered.
     pub header_layout: HeaderLayout,
+    /// The message that should be displayed in a status bar at the bottom.
     pub status: Option<String>,
 }
 
