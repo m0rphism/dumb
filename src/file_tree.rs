@@ -4,6 +4,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use anyhow::{Context, Result};
+
 use crate::scan::{Inode, InodeId, ScanEvent};
 
 /// In-memory representation of a scanned directory tree.
@@ -162,15 +164,18 @@ impl FileNode {
 }
 
 impl FileTree {
-    pub fn new(path: impl AsRef<Path>) -> Self {
-        let meta = path.as_ref().metadata().unwrap();
-        Self {
+    pub fn new(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref();
+        let meta = path
+            .metadata()
+            .with_context(|| format!("Failed to read metadata for path {path:?}."))?;
+        Ok(Self {
             inodes: HashMap::new(),
             root: FileNode::new(InodeId::new(&meta)),
             errors: vec![],
             deleted_paths: vec![],
             linked: HashMap::new(),
-        }
+        })
     }
 
     pub fn get(&self, path: &Path) -> Option<&FileNode> {

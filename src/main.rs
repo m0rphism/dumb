@@ -52,11 +52,13 @@ fn run() -> Result<()> {
 
     let (config, theme) = load_config_and_theme(&args.config)?;
 
-    let root_dir = args
-        .root_dir
-        .unwrap_or_else(|| std::env::current_dir().unwrap());
+    let root_dir = match args.root_dir {
+        Some(path) => path,
+        None => std::env::current_dir()
+            .context("Failed to determine the current working directory.")?,
+    };
 
-    let file_tree = Arc::new(Mutex::new(FileTree::new(&root_dir)));
+    let file_tree = Arc::new(Mutex::new(FileTree::new(&root_dir)?));
 
     let (sender, receiver) = channel();
     let (done_sender, done_receiver) = channel();
