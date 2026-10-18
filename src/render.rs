@@ -27,10 +27,22 @@ pub fn rgb(r: f32, g: f32, b: f32) -> Color {
     }
 }
 
-pub fn sorted_entries<'a>(
-    file_tree: &'a FileTree,
-    state: &State,
-) -> Vec<(&'a OsString, &'a FileNode, Inode, bool, u64)> {
+/// An entry of the currently viewed subdirectory.
+#[derive(Debug)]
+pub struct FileEntry<'a> {
+    /// The file name of the entry.
+    pub name: &'a OsString,
+    /// The node of the entry in the file tree.
+    pub node: &'a FileNode,
+    /// The inode of the entry.
+    pub inode: Inode,
+    /// Whether the entry is a real directory (not a symlink).
+    pub is_dir: bool,
+    /// The size of the entry in bytes according to the active size metric.
+    pub size: u64,
+}
+
+pub fn sorted_entries<'a>(file_tree: &'a FileTree, state: &State) -> Vec<FileEntry<'a>> {
     let children = &file_tree.get(&state.file_view.cur_subdir).unwrap().children;
     let mut children = children
         .iter()
@@ -59,29 +71,29 @@ pub fn sorted_entries<'a>(
                     }
                 }
             };
-            (name, node, inode, is_dir, size)
+            FileEntry {
+                name,
+                node,
+                inode,
+                is_dir,
+                size,
+            }
         })
         .collect::<Vec<_>>();
     match state.file_view.sort_by {
         SortBy::Name => {
-            children.sort_by_key(|(name, _node, _inode, is_dir, _size)| {
-                let is_file = !*is_dir && state.file_view.sort_dirs_before_files;
-                (is_file, *name)
+            children.sort_by_key(|entry| {
+                let is_file = !entry.is_dir && state.file_view.sort_dirs_before_files;
+                (is_file, entry.name)
             });
         }
         SortBy::Size => {
-            children.sort_by(
-                |(name1, _node1, _inode1, _dir1, size1), (name2, _node2, _inode2, _dir2, size2)| {
-                    (size2, *name1).cmp(&(size1, *name2))
-                },
-            );
+            children.sort_by(|e1, e2| (e2.size, e1.name).cmp(&(e1.size, e2.name)));
         }
         SortBy::ModTime => {
-            children.sort_by(
-                |(name1, _node1, inode1, _dir1, _size1), (name2, _node2, inode2, _dir2, _size2)| {
-                    (inode2.last_modified, *name1).cmp(&(inode1.last_modified, *name2))
-                },
-            );
+            children.sort_by(|e1, e2| {
+                (e2.inode.last_modified, e1.name).cmp(&(e1.inode.last_modified, e2.name))
+            });
         }
     }
     children
@@ -377,15 +389,13 @@ fn render_file_tree(
         state.file_view.cur_entry_ix() as i64 - (layout.num_content_lines() as i64 / 2),
     ) as usize;
     let row_width = columns_width(&cols, name_col_width);
-    for (j, (i, (name, node, inode, is_dir, size))) in
-        children.iter().enumerate().skip(skip).enumerate()
-    {
+    for (j, (i, e)) in children.iter().enumerate().skip(skip).enumerate() {
         let y_cur = layout.content_top_line() + 1 + j as u16;
         if y_cur > layout.content_bottom_line() {
             break;
         }
         let is_selected = i == state.file_view.cur_entry_ix();
-        let has_error = node.num_child_errors > 0 || matches!(node.state, FileState::Failed(_));
+        let has_error = e.node.num_child_errors > 0 || matches!(e.node.state, FileState::Failed(_));
         let highlighted = is_selected || has_error;
 
         let style_mod = |s: &Style| match (is_selected, has_error) {
@@ -412,7 +422,7 @@ fn render_file_tree(
             }
             match col {
                 Column::Progress => {
-                    let state_str = match node.state {
+                    let state_str = match e.node.state {
                         FileState::Queued => "…",
                         FileState::Finished => " ",
                         FileState::Failed(_) => "E",
@@ -420,17 +430,18 @@ fn render_file_tree(
                     line.text(&style_mod(&style.progress_value), state_str);
                 }
                 Column::Name => {
-                    let mut name = name
+                    let mut name = e
+                        .name
                         .to_string_lossy()
                         .chars()
                         .take(width as usize)
                         .collect::<String>();
-                    if *is_dir {
+                    if e.is_dir {
                         name += "/";
                     }
-                    let s = if inode.is_dir {
+                    let s = if e.inode.is_dir {
                         &style.name_dir_value
-                    } else if inode.num_hardlinks > 1 {
+                    } else if e.inode.num_hardlinks > 1 {
                         &style.name_hardlink_value
                     } else {
                         &style.name_file_value
@@ -438,7 +449,7 @@ fn render_file_tree(
                     line.text(&style_mod(s), &name);
                 }
                 Column::SizeAbs => {
-                    let size_abs_str = bytes_to_str(*size);
+                    let size_abs_str = bytes_to_str(e.size);
                     line.spaces_until(
                         &bg_style,
                         x + width.saturating_sub(size_abs_str.len() as u16),
@@ -446,7 +457,7 @@ fn render_file_tree(
                     line.text(&style_mod(&style.size_abs_value), &size_abs_str);
                 }
                 Column::SizeRel => {
-                    let abs_size_percent = (*size as f64 / ri.target_dir_size as f64) * 100.0;
+                    let abs_size_percent = (e.size as f64 / ri.target_dir_size as f64) * 100.0;
                     let abs_size_percent_str = format!("{:6.2} %", abs_size_percent);
                     line.spaces_until(
                         &bg_style,
@@ -464,7 +475,7 @@ fn render_file_tree(
                     line.text(&s, &abs_size_percent_str);
                 }
                 Column::SizeCur => {
-                    let size_percent = (*size as f64 / ri.cur_dir_size as f64) * 100.0;
+                    let size_percent = (e.size as f64 / ri.cur_dir_size as f64) * 100.0;
                     let size_percent_str = format!("{:6.2} %", size_percent);
                     line.spaces_until(
                         &bg_style,
@@ -478,7 +489,7 @@ fn render_file_tree(
                     line.text(&s, &size_percent_str);
                 }
                 Column::ModTime => {
-                    let last_modified = DateTime::<Local>::from(inode.last_modified);
+                    let last_modified = DateTime::<Local>::from(e.inode.last_modified);
                     let s_val = &style_mod(&style.modtime_value);
                     let s_delim = &style_mod(&style.modtime_delim);
                     line.text(s_val, &last_modified.format("%Y").to_string());

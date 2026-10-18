@@ -194,8 +194,8 @@ fn handle_key_event(state: &mut State, config: &Config, key_event: KeyEvent) -> 
                     let file_tree = state.file_tree.lock().unwrap();
                     let entries = sorted_entries(&file_tree, state);
                     match entries.get(state.file_view.cur_entry_ix()) {
-                        Some((cur_name, _, _, true, _)) => {
-                            state.file_view.enter_subdir(cur_name);
+                        Some(entry) if entry.is_dir => {
+                            state.file_view.enter_subdir(entry.name);
                             true
                         }
                         _ => false,
@@ -267,8 +267,8 @@ fn handle_key_event(state: &mut State, config: &Config, key_event: KeyEvent) -> 
                 KeyCode::Char('e') => {
                     let file_tree = state.file_tree.lock().unwrap();
                     let children = sorted_entries(&file_tree, state);
-                    if let Some((name, _, _, _, _)) = children.get(state.file_view.cur_entry_ix()) {
-                        let cur_path = state.file_view.cur_subdir.join(name);
+                    if let Some(entry) = children.get(state.file_view.cur_entry_ix()) {
+                        let cur_path = state.file_view.cur_subdir.join(entry.name);
                         let errors: Vec<_> = file_tree
                             .errors
                             .iter()
@@ -680,7 +680,7 @@ impl State {
         sorted_entries(&file_tree, self)
             .into_iter()
             .nth(ix)
-            .map(|(name, _, inode, _, _)| (name.clone(), inode))
+            .map(|entry| (entry.name.clone(), entry.inode))
     }
 
     /// Target-relative path of the currently selected entry.
