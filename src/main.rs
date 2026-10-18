@@ -35,7 +35,7 @@ use crate::{
     layout::Layout,
     motion::Motion,
     raw_mode::RawMode,
-    render::{fixed_columns_width, render_state, sorted_entries},
+    render::{SortedCache, fixed_columns_width, render_state},
     scan::{Inode, scan},
     theme::Theme,
 };
@@ -142,21 +142,23 @@ fn run() -> Result<()> {
         help_meta: HelpMeta::new(),
         status: None,
     };
+    let mut sorted_cache = SortedCache::default();
 
     let mut stdout = stdout();
     let _raw_mode = RawMode::enter()?;
-    state.layout = render_state(&mut stdout, &state, &theme)?;
+    state.layout = render_state(&mut stdout, &state, &mut sorted_cache, &theme)?;
     state.frame += 1;
 
     for event in receiver {
         // println!("Received: {event:?}");
         let redraw = match event {
             Event::Term(event) => match event {
-                TermEvent::Key(key_event) => match handle_key_event(&mut state, &config, key_event)
-                {
-                    Some(redraw) => redraw,
-                    None => break,
-                },
+                TermEvent::Key(key_event) => {
+                    match handle_key_event(&mut state, &mut sorted_cache, &config, key_event) {
+                        Some(redraw) => redraw,
+                        None => break,
+                    }
+                }
                 TermEvent::Resize(w, h) => {
                     if state.term_size == [w, h] {
                         false
@@ -170,7 +172,7 @@ fn run() -> Result<()> {
             Event::Redraw => true,
         };
         if redraw {
-            state.layout = render_state(&mut stdout, &state, &theme)?;
+            state.layout = render_state(&mut stdout, &state, &mut sorted_cache, &theme)?;
             state.frame += 1;
         }
     }
@@ -179,7 +181,12 @@ fn run() -> Result<()> {
 }
 
 /// Returns `None` if the program should quit, or `Some(should_redraw)`.
-fn handle_key_event(state: &mut State, config: &Config, key_event: KeyEvent) -> Option<bool> {
+fn handle_key_event(
+    state: &mut State,
+    sorted_cache: &mut SortedCache,
+    config: &Config,
+    key_event: KeyEvent,
+) -> Option<bool> {
     let redraw = if key_event.kind != KeyEventKind::Release {
         // Any key press clears the status message.
         state.status = None;
@@ -201,10 +208,11 @@ fn handle_key_event(state: &mut State, config: &Config, key_event: KeyEvent) -> 
                 KeyCode::Char('h') | KeyCode::Left => state.file_view.leave_subdir(),
                 KeyCode::Char('l') | KeyCode::Right => {
                     let file_tree = state.file_tree.lock().unwrap();
-                    let entries = sorted_entries(&file_tree, state);
+                    let entries =
+                        sorted_cache.entries(&file_tree, &state.root_dir, &state.file_view);
                     match entries.get(state.file_view.cur_entry_ix()) {
                         Some(entry) if entry.is_dir => {
-                            state.file_view.enter_subdir(entry.name);
+                            state.file_view.enter_subdir(&entry.name);
                             true
                         }
                         _ => false,
@@ -275,9 +283,10 @@ fn handle_key_event(state: &mut State, config: &Config, key_event: KeyEvent) -> 
                 ),
                 KeyCode::Char('e') => {
                     let file_tree = state.file_tree.lock().unwrap();
-                    let children = sorted_entries(&file_tree, state);
+                    let children =
+                        sorted_cache.entries(&file_tree, &state.root_dir, &state.file_view);
                     if let Some(entry) = children.get(state.file_view.cur_entry_ix()) {
-                        let cur_path = state.file_view.cur_subdir.join(entry.name);
+                        let cur_path = state.file_view.cur_subdir.join(&*entry.name);
                         let errors: Vec<_> = file_tree
                             .errors
                             .iter()
@@ -325,7 +334,7 @@ fn handle_key_event(state: &mut State, config: &Config, key_event: KeyEvent) -> 
                     }
                 }
                 KeyCode::Char('d') if config.enable_delete_binding => {
-                    if let Some(rel) = state.cur_entry_path() {
+                    if let Some(rel) = state.cur_entry_path(sorted_cache) {
                         if config.require_delete_confirmation {
                             state.display_mode = DisplayMode::DeleteDialog(rel);
                         } else {
@@ -688,19 +697,18 @@ impl State {
         !matches!(self.file_tree.lock().unwrap().root.state, FileState::Queued)
     }
 
-    pub fn cur_entry(&self) -> Option<(OsString, Inode)> {
-        let ix = self.file_view.cur_entry_ix();
+    pub fn cur_entry(&self, sorted_cache: &mut SortedCache) -> Option<(Box<OsString>, Inode)> {
         let file_tree = self.file_tree.lock().unwrap();
-        sorted_entries(&file_tree, self)
-            .into_iter()
-            .nth(ix)
+        sorted_cache
+            .entries(&file_tree, &self.root_dir, &self.file_view)
+            .get(self.file_view.cur_entry_ix())
             .map(|entry| (entry.name.clone(), entry.inode))
     }
 
     /// `root_dir`-relative path of the currently selected entry.
-    pub fn cur_entry_path(&self) -> Option<PathBuf> {
-        let (name, _) = self.cur_entry()?;
-        Some(self.file_view.cur_subdir.join(&name))
+    pub fn cur_entry_path(&self, sorted_cache: &mut SortedCache) -> Option<PathBuf> {
+        let (name, _) = self.cur_entry(sorted_cache)?;
+        Some(self.file_view.cur_subdir.join(&*name))
     }
 
     pub fn try_delete(&mut self, rel: &Path) {

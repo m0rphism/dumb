@@ -33,6 +33,9 @@ pub struct FileTree {
     /// This ensures correct behavior if the user deletes an entry in the TUI while it is being
     /// scanned.
     pub deleted_paths: Vec<PathBuf>,
+    /// Monotonically increasing version counter, bumped by every modification of the tree, such
+    /// that cached views of the tree can detect staleness (see `crate::render::SortedCache`).
+    pub version: u64,
     /// Maps inodes with multiple paths (hardlinks) to their paths and place of contribution. Kept
     /// for the whole session so that on deletions of one path the size contributions of the other
     /// paths can be adjusted without having to retraverse the entire root directory.
@@ -174,6 +177,7 @@ impl FileTree {
             root: FileNode::new(InodeId::new(&meta)),
             errors: vec![],
             deleted_paths: vec![],
+            version: 0,
             linked: HashMap::new(),
         })
     }
@@ -261,6 +265,7 @@ impl FileTree {
                 self.errors.push((path, err));
             }
         }
+        self.version += 1;
     }
 
     /// Delete the subtree at `path` (relative to the root directory) from the tree and update all
@@ -376,6 +381,7 @@ impl FileTree {
         }
 
         self.deleted_paths.push(path.to_path_buf());
+        self.version += 1;
 
         Some(())
     }

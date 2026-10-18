@@ -53,7 +53,7 @@ impl HeaderLayout {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SortBy {
     Name,

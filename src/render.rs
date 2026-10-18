@@ -1,7 +1,7 @@
 use std::{
     ffi::OsString,
     io::{Stdout, Write},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use anyhow::Result;
@@ -9,7 +9,7 @@ use chrono::{DateTime, Local};
 use crossterm::style::Color;
 
 use crate::{
-    DisplayMode, ErrorView, HelpView, SortBy, State,
+    DisplayMode, ErrorView, FileView, HelpView, SortBy, State,
     config::{HeaderLayout, SizeMetric},
     file_tree::{FileNode, FileState, FileTree},
     frame::{Frame, LineWriter},
@@ -27,13 +27,15 @@ pub fn rgb(r: f32, g: f32, b: f32) -> Color {
     }
 }
 
-/// An entry of the currently viewed subdirectory.
-#[derive(Debug)]
-pub struct FileEntry<'a> {
+/// An entry of a directory in the file view.
+#[derive(Debug, Clone)]
+pub struct FileEntry {
     /// The file name of the entry.
-    pub name: &'a OsString,
-    /// The node of the entry in the file tree.
-    pub node: &'a FileNode,
+    pub name: Box<OsString>,
+    /// The state of the entry's node in the file tree (relevant for the progress column).
+    pub node_state: FileState,
+    /// The number of errors in the entry's subtree (relevant for the error row highlighting).
+    pub num_child_errors: usize,
     /// The inode of the entry.
     pub inode: Inode,
     /// Whether the entry is a real directory (not a symlink).
@@ -42,15 +44,15 @@ pub struct FileEntry<'a> {
     pub size: u64,
 }
 
-pub fn sorted_entries<'a>(file_tree: &'a FileTree, state: &State) -> Vec<FileEntry<'a>> {
-    let children = &file_tree.get(&state.file_view.cur_subdir).unwrap().children;
+pub fn sorted_entries(file_tree: &FileTree, root_dir: &Path, fv: &FileView) -> Vec<FileEntry> {
+    let children = &file_tree.get(&fv.cur_subdir).unwrap().children;
     let mut children = children
         .iter()
         .map(|(name, node)| {
-            let path = state.root_dir.join(&state.file_view.cur_subdir).join(name);
+            let path = root_dir.join(&fv.cur_subdir).join(name);
             let is_dir = path.is_dir() && !path.is_symlink();
             let inode = *file_tree.inodes.get(&node.inode_id).unwrap();
-            let size = match state.file_view.size_metric {
+            let size = match fv.size_metric {
                 SizeMetric::Naive => {
                     if inode.is_dir {
                         node.naive_size
@@ -69,34 +71,92 @@ pub fn sorted_entries<'a>(file_tree: &'a FileTree, state: &State) -> Vec<FileEnt
                 }
             };
             FileEntry {
-                name,
-                node,
+                name: name.clone().into(),
+                node_state: node.state.clone(),
+                num_child_errors: node.num_child_errors,
                 inode,
                 is_dir,
                 size,
             }
         })
         .collect::<Vec<_>>();
-    match state.file_view.sort_by {
+    match fv.sort_by {
         SortBy::Name => {
-            children.sort_by_key(|entry| {
-                let is_file = !entry.is_dir && state.file_view.sort_dirs_before_files;
-                (is_file, entry.name)
+            children.sort_by(|e1, e2| {
+                let is_file1 = !e1.is_dir && fv.sort_dirs_before_files;
+                let is_file2 = !e2.is_dir && fv.sort_dirs_before_files;
+                is_file1.cmp(&is_file2).then_with(|| e1.name.cmp(&e2.name))
             });
         }
         SortBy::Size => {
-            children.sort_by(|e1, e2| (e2.size, e1.name).cmp(&(e1.size, e2.name)));
+            children
+                .sort_by(|e1, e2| (e2.size, e1.name.as_ref()).cmp(&(e1.size, e2.name.as_ref())));
         }
         SortBy::ModTime => {
             children.sort_by(|e1, e2| {
-                (e2.inode.last_modified, e1.name).cmp(&(e1.inode.last_modified, e2.name))
+                (e2.inode.last_modified, e1.name.as_ref())
+                    .cmp(&(e1.inode.last_modified, e2.name.as_ref()))
             });
         }
     }
     children
 }
 
-pub fn render_state(stdout: &mut Stdout, state: &State, theme: &Theme) -> Result<Layout> {
+#[derive(Debug)]
+pub struct SortedCache {
+    version: u64,
+    cur_subdir: PathBuf,
+    sort_by: SortBy,
+    sort_dirs_before_files: bool,
+    size_metric: SizeMetric,
+    entries: Vec<FileEntry>,
+}
+
+impl Default for SortedCache {
+    fn default() -> Self {
+        Self {
+            version: 0,
+            cur_subdir: PathBuf::new(),
+            sort_by: SortBy::Size,
+            sort_dirs_before_files: false,
+            size_metric: SizeMetric::Freed,
+            entries: vec![],
+        }
+    }
+}
+
+impl SortedCache {
+    /// The sorted entries of the currently viewed subdirectory.
+    pub fn entries<'a, 'b>(
+        &'b mut self,
+        file_tree: &'a FileTree,
+        root_dir: &'a Path,
+        fv: &'a FileView,
+    ) -> &'b [FileEntry] {
+        let stale = self.version != file_tree.version
+            || self.cur_subdir != fv.cur_subdir
+            || self.sort_by != fv.sort_by
+            || self.sort_dirs_before_files != fv.sort_dirs_before_files
+            || self.size_metric != fv.size_metric;
+        if !stale {
+            return &self.entries;
+        }
+        self.version = file_tree.version;
+        self.cur_subdir = fv.cur_subdir.clone();
+        self.sort_by = fv.sort_by;
+        self.sort_dirs_before_files = fv.sort_dirs_before_files;
+        self.size_metric = fv.size_metric;
+        self.entries = sorted_entries(file_tree, root_dir, fv);
+        &self.entries
+    }
+}
+
+pub fn render_state(
+    stdout: &mut Stdout,
+    state: &State,
+    sorted_cache: &mut SortedCache,
+    theme: &Theme,
+) -> Result<Layout> {
     // We buffer all rendering before sending it to stdout to remove terminal flickering.
     // Flickering shouldn't be an issue if stdout is only flushed at the end, but for some reason
     // it is...
@@ -126,7 +186,15 @@ pub fn render_state(stdout: &mut Stdout, state: &State, theme: &Theme) -> Result
     let layout = Layout::new(state.term_size, header_height);
     match &state.display_mode {
         DisplayMode::FileTree => {
-            render_file_tree(&mut frame, &file_tree, state, theme, &render_info, &layout);
+            render_file_tree(
+                &mut frame,
+                &file_tree,
+                state,
+                sorted_cache,
+                theme,
+                &render_info,
+                &layout,
+            );
         }
         DisplayMode::ErrorView(error_view) => {
             render_errors(&mut frame, state, theme, error_view, &layout);
@@ -335,6 +403,7 @@ fn render_file_tree(
     frame: &mut Frame,
     file_tree: &FileTree,
     state: &State,
+    sorted_cache: &mut SortedCache,
     theme: &Theme,
     ri: &RenderInfo,
     layout: &Layout,
@@ -384,7 +453,7 @@ fn render_file_tree(
     }
 
     // Rows
-    let children = sorted_entries(file_tree, state);
+    let children = sorted_cache.entries(file_tree, &state.root_dir, &state.file_view);
     let skip = i64::max(
         0,
         state.file_view.cur_entry_ix() as i64 - (layout.num_content_lines() as i64 / 2),
@@ -396,7 +465,7 @@ fn render_file_tree(
             break;
         }
         let is_selected = i == state.file_view.cur_entry_ix();
-        let has_error = e.node.num_child_errors > 0 || matches!(e.node.state, FileState::Failed(_));
+        let has_error = e.num_child_errors > 0 || matches!(e.node_state, FileState::Failed(_));
         let highlighted = is_selected || has_error;
 
         let style_mod = |s: &Style| match (is_selected, has_error) {
@@ -423,7 +492,7 @@ fn render_file_tree(
             }
             match col {
                 Column::Progress => {
-                    let state_str = match e.node.state {
+                    let state_str = match e.node_state {
                         FileState::Queued => "…",
                         FileState::Finished => " ",
                         FileState::Failed(_) => "E",
