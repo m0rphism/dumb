@@ -3,6 +3,7 @@ pub mod config;
 pub mod file_tree;
 pub mod frame;
 pub mod help;
+pub mod layout;
 pub mod motion;
 pub mod raw_mode;
 pub mod render;
@@ -30,6 +31,7 @@ use crate::{
     config::{Config, HeaderLayout, SizeMetric, SortBy},
     file_tree::{FileState, FileTree},
     help::{HELP, HelpMeta},
+    layout::Layout,
     motion::Motion,
     raw_mode::RawMode,
     render::{fixed_columns_width, render_state, sorted_entries},
@@ -125,6 +127,7 @@ fn run() -> Result<()> {
         cur_subdir_entry_ixs: vec![0],
         target_path,
         term_size,
+        layout: Layout::new(term_size, 1),
         frame: 0,
         sort_by: config.default_sort_mode,
         header_layout: config.default_header_layout,
@@ -145,7 +148,8 @@ fn run() -> Result<()> {
 
     let mut stdout = stdout();
     let _raw_mode = RawMode::enter()?;
-    render_state(&mut stdout, &mut state, &theme)?;
+    state.layout = render_state(&mut stdout, &state, &theme)?;
+    state.frame += 1;
 
     for event in receiver {
         // println!("Received: {event:?}");
@@ -169,7 +173,8 @@ fn run() -> Result<()> {
             Event::Redraw => true,
         };
         if redraw {
-            render_state(&mut stdout, &mut state, &theme)?;
+            state.layout = render_state(&mut stdout, &state, &theme)?;
+            state.frame += 1;
         }
     }
 
@@ -182,12 +187,12 @@ fn handle_key_event(state: &mut State, config: &Config, key_event: KeyEvent) -> 
         // Any key press clears the status message.
         state.status = None;
 
-        let h = state.term_size[1];
+        let layout = state.layout;
         match &mut state.display_mode {
             DisplayMode::FileTree => match key_event.code {
                 KeyCode::Char('q') => return None,
-                KeyCode::Char('j') | KeyCode::Down => state.apply_motion(Motion::Down),
-                KeyCode::Char('k') | KeyCode::Up => state.apply_motion(Motion::Up),
+                KeyCode::Char('j') | KeyCode::Down => state.apply_motion(Motion::Down, &layout),
+                KeyCode::Char('k') | KeyCode::Up => state.apply_motion(Motion::Up, &layout),
                 KeyCode::Char('h') | KeyCode::Left => {
                     if let Some(p) = state.cur_subdir.parent() {
                         state.cur_subdir = p.to_path_buf();
@@ -218,21 +223,21 @@ fn handle_key_event(state: &mut State, config: &Config, key_event: KeyEvent) -> 
                     }
                     redraw
                 }
-                KeyCode::Char('g') | KeyCode::Home => state.apply_motion(Motion::First),
-                KeyCode::Char('G') | KeyCode::End => state.apply_motion(Motion::Last),
+                KeyCode::Char('g') | KeyCode::Home => state.apply_motion(Motion::First, &layout),
+                KeyCode::Char('G') | KeyCode::End => state.apply_motion(Motion::Last, &layout),
                 KeyCode::Char('f') if key_event.modifiers == KeyModifiers::CONTROL => {
-                    state.apply_motion(Motion::PageDown)
+                    state.apply_motion(Motion::PageDown, &layout)
                 }
-                KeyCode::PageDown => state.apply_motion(Motion::PageDown),
+                KeyCode::PageDown => state.apply_motion(Motion::PageDown, &layout),
                 KeyCode::Char('b') if key_event.modifiers == KeyModifiers::CONTROL => {
-                    state.apply_motion(Motion::PageUp)
+                    state.apply_motion(Motion::PageUp, &layout)
                 }
-                KeyCode::PageUp => state.apply_motion(Motion::PageUp),
+                KeyCode::PageUp => state.apply_motion(Motion::PageUp, &layout),
                 KeyCode::Char('d') if key_event.modifiers == KeyModifiers::CONTROL => {
-                    state.apply_motion(Motion::HalfPageDown)
+                    state.apply_motion(Motion::HalfPageDown, &layout)
                 }
                 KeyCode::Char('u') if key_event.modifiers == KeyModifiers::CONTROL => {
-                    state.apply_motion(Motion::HalfPageUp)
+                    state.apply_motion(Motion::HalfPageUp, &layout)
                 }
                 KeyCode::Char('s') => {
                     state.sort_by = state.sort_by.next();
@@ -365,23 +370,25 @@ fn handle_key_event(state: &mut State, config: &Config, key_event: KeyEvent) -> 
                     state.display_mode = DisplayMode::FileTree;
                     true
                 }
-                KeyCode::Char('j') | KeyCode::Down => help_view.apply_motion(Motion::Down, h),
-                KeyCode::Char('k') | KeyCode::Up => help_view.apply_motion(Motion::Up, h),
-                KeyCode::Char('g') | KeyCode::Home => help_view.apply_motion(Motion::First, h),
-                KeyCode::Char('G') | KeyCode::End => help_view.apply_motion(Motion::Last, h),
+                KeyCode::Char('j') | KeyCode::Down => help_view.apply_motion(Motion::Down, &layout),
+                KeyCode::Char('k') | KeyCode::Up => help_view.apply_motion(Motion::Up, &layout),
+                KeyCode::Char('g') | KeyCode::Home => {
+                    help_view.apply_motion(Motion::First, &layout)
+                }
+                KeyCode::Char('G') | KeyCode::End => help_view.apply_motion(Motion::Last, &layout),
                 KeyCode::Char('f') if key_event.modifiers == KeyModifiers::CONTROL => {
-                    help_view.apply_motion(Motion::PageDown, h)
+                    help_view.apply_motion(Motion::PageDown, &layout)
                 }
-                KeyCode::PageDown => help_view.apply_motion(Motion::PageDown, h),
+                KeyCode::PageDown => help_view.apply_motion(Motion::PageDown, &layout),
                 KeyCode::Char('b') if key_event.modifiers == KeyModifiers::CONTROL => {
-                    help_view.apply_motion(Motion::PageUp, h)
+                    help_view.apply_motion(Motion::PageUp, &layout)
                 }
-                KeyCode::PageUp => help_view.apply_motion(Motion::PageUp, h),
+                KeyCode::PageUp => help_view.apply_motion(Motion::PageUp, &layout),
                 KeyCode::Char('d') if key_event.modifiers == KeyModifiers::CONTROL => {
-                    help_view.apply_motion(Motion::HalfPageDown, h)
+                    help_view.apply_motion(Motion::HalfPageDown, &layout)
                 }
                 KeyCode::Char('u') if key_event.modifiers == KeyModifiers::CONTROL => {
-                    help_view.apply_motion(Motion::HalfPageUp, h)
+                    help_view.apply_motion(Motion::HalfPageUp, &layout)
                 }
                 _ => false,
             },
@@ -464,8 +471,12 @@ pub struct HelpView {
 }
 
 impl HelpView {
-    pub fn apply_motion(&mut self, motion: Motion, term_height: u16) -> bool {
-        motion.apply_check(&mut self.cur_line_ix, HELP.len(), term_height as usize - 3)
+    pub fn apply_motion(&mut self, motion: Motion, layout: &Layout) -> bool {
+        motion.apply_check(
+            &mut self.cur_line_ix,
+            HELP.len(),
+            layout.num_content_lines() as usize,
+        )
     }
 }
 
@@ -476,9 +487,17 @@ pub struct ErrorView {
     pub cur_error_ix: usize,
 }
 
+/// The number of errors per page in the error view. Each error entry spans a
+/// variable number of lines, so the page size is in entries, not lines.
+const ERROR_VIEW_PAGE_SIZE: usize = 10;
+
 impl ErrorView {
     pub fn apply_motion(&mut self, motion: Motion) -> bool {
-        motion.apply_check(&mut self.cur_error_ix, self.errors.len(), 10)
+        motion.apply_check(
+            &mut self.cur_error_ix,
+            self.errors.len(),
+            ERROR_VIEW_PAGE_SIZE,
+        )
     }
 }
 
@@ -501,13 +520,13 @@ pub struct State {
     pub cur_subdir: PathBuf,
     pub cur_subdir_entry_ixs: Vec<usize>,
     pub term_size: [u16; 2],
+    pub layout: Layout,
     pub frame: usize,
     pub sort_by: SortBy,
     pub size_metric: SizeMetric,
     pub sort_dirs_before_files: bool,
     pub show_size_cur_column: bool,
     pub name_col_width: i64,
-    /// Maximum width chosen by the auto Name column width; 0 means no maximum.
     pub max_name_column_width: i64,
     pub display_mode: DisplayMode,
     pub help_meta: HelpMeta,
@@ -532,11 +551,10 @@ impl State {
     }
     /// Apply the motion to the file list and return true iff the motion actually changed the
     /// selected entry.
-    pub fn apply_motion(&mut self, motion: Motion) -> bool {
+    pub fn apply_motion(&mut self, motion: Motion, layout: &Layout) -> bool {
         let num_entries = self.cur_subdir_entry_len();
-        let height = self.term_size[1] as usize - 3;
         let i = self.cur_subdir_entry_ix_mut();
-        motion.apply_check(i, num_entries, height)
+        motion.apply_check(i, num_entries, layout.num_file_list_lines() as usize)
     }
 
     pub fn is_scan_done(&self) -> bool {

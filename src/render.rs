@@ -14,6 +14,7 @@ use crate::{
     file_tree::{FileNode, FileState, FileTree},
     frame::{Frame, LineWriter},
     help::HELP,
+    layout::Layout,
     scan::Inode,
     theme::{Style, Theme, interpolate_color},
 };
@@ -83,7 +84,7 @@ pub fn sorted_entries<'a>(
     children
 }
 
-pub fn render_state(stdout: &mut Stdout, state: &mut State, theme: &Theme) -> Result<()> {
+pub fn render_state(stdout: &mut Stdout, state: &State, theme: &Theme) -> Result<Layout> {
     // We buffer all rendering before sending it to stdout to remove terminal flickering.
     // Flickering shouldn't be an issue if stdout is only flushed at the end, but for some reason
     // it is...
@@ -105,23 +106,19 @@ pub fn render_state(stdout: &mut Stdout, state: &mut State, theme: &Theme) -> Re
     };
 
     let header_height = render_header(&mut frame, state, theme, &render_info);
+    let layout = Layout::new(state.term_size, header_height);
     match &state.display_mode {
         DisplayMode::FileTree => {
-            render_file_tree(&mut frame, state, theme, &render_info, header_height + 1);
+            render_file_tree(&mut frame, state, theme, &render_info, &layout);
         }
         DisplayMode::ErrorView(error_view) => {
-            render_errors(&mut frame, state, theme, error_view, header_height + 1);
+            render_errors(&mut frame, state, theme, error_view, &layout);
         }
         DisplayMode::HelpView(help_view) => {
-            render_help_view(&mut frame, state, theme, help_view, header_height + 1);
+            render_help_view(&mut frame, state, theme, help_view, &layout);
         }
         DisplayMode::DeleteDialog(target) => {
-            render_delete_dialog(
-                &mut frame,
-                theme,
-                header_height + 1,
-                &state.target_path.join(target),
-            );
+            render_delete_dialog(&mut frame, theme, &layout, &state.target_path.join(target));
         }
     };
 
@@ -129,16 +126,14 @@ pub fn render_state(stdout: &mut Stdout, state: &mut State, theme: &Theme) -> Re
     if let Some(msg) = &state.status {
         let width = state.term_size[0].saturating_sub(1) as usize;
         let msg: String = msg.chars().take(width).collect();
-        let mut line = frame.line(state.term_size[1].saturating_sub(1));
+        let mut line = frame.line(layout.status_line());
         line.text(&theme.header.error, &msg);
     }
-
-    state.frame += 1;
 
     stdout.write_all(frame.bytes())?;
     stdout.flush()?;
 
-    Ok(())
+    Ok(layout)
 }
 
 pub struct RenderInfo {
@@ -317,10 +312,10 @@ fn next_field(line: &mut LineWriter, label: &Style, layout: HeaderLayout) {
 
 fn render_file_tree(
     frame: &mut Frame,
-    state: &mut State,
+    state: &State,
     theme: &Theme,
     ri: &RenderInfo,
-    mut y: u16,
+    layout: &Layout,
 ) {
     let is_scan_done = match ri.target_dir_state {
         FileState::Queued => false,
@@ -337,7 +332,7 @@ fn render_file_tree(
     // Header
     let style = &theme.file_table;
     {
-        let mut line = frame.line(y);
+        let mut line = frame.line(layout.content_top_line());
         let mut x = 0;
         for (i, col) in cols.iter().enumerate() {
             let header_style = match col {
@@ -364,23 +359,21 @@ fn render_file_tree(
         }
     }
 
-    y += 1;
-
     // Rows
     let file_tree = state.file_tree.lock().unwrap();
     let children = sorted_entries(&file_tree, state);
     let skip = i64::max(
         0,
-        state.cur_subdir_entry_ix() as i64 - ((state.term_size[1] as i64 - y as i64) / 2),
+        state.cur_subdir_entry_ix() as i64 - (layout.num_content_lines() as i64 / 2),
     ) as usize;
     let row_width = columns_width(&cols, name_col_width);
     for (j, (i, (name, node, inode, is_dir, size))) in
         children.iter().enumerate().skip(skip).enumerate()
     {
-        if y as usize + j >= state.term_size[1] as usize {
+        let y_cur = layout.content_top_line() + 1 + j as u16;
+        if y_cur > layout.content_bottom_line() {
             break;
         }
-        let y_cur = y + j as u16;
         let is_selected = i == state.cur_subdir_entry_ix();
         let has_error = node.num_child_errors > 0 || matches!(node.state, FileState::Failed(_));
         let highlighted = is_selected || has_error;
@@ -494,14 +487,14 @@ fn render_file_tree(
     }
 }
 
-fn render_delete_dialog(frame: &mut Frame, theme: &Theme, y: u16, path_to_delete: &Path) {
+fn render_delete_dialog(frame: &mut Frame, theme: &Theme, layout: &Layout, path_to_delete: &Path) {
     let style = &theme.delete_dialog;
-    let mut line = frame.line(y);
+    let mut line = frame.line(layout.content_top_line());
     line.text(
         &style.message,
         "Delete the following file/directory?  [y/n]",
     );
-    let mut line = frame.line(y + 2);
+    let mut line = frame.line(layout.content_top_line() + 2);
     line.spaces_until(&Style::default(), 2);
     line.text(&style.path, path_to_delete.to_string_lossy().as_ref());
 }
@@ -511,11 +504,12 @@ fn render_errors(
     state: &State,
     theme: &Theme,
     error_view: &ErrorView,
-    mut y: u16,
+    layout: &Layout,
 ) {
     let style = &theme.error_view;
 
     let width = state.term_size[0] as usize;
+    let mut y = layout.content_top_line();
     for (i, e) in error_view
         .errors
         .iter()
@@ -536,18 +530,24 @@ fn render_errors(
             y += 1;
         }
         y += 1;
-        if y >= state.term_size[1] {
+        if y > layout.content_bottom_line() {
             break;
         }
     }
 }
 
-fn render_help_view(frame: &mut Frame, state: &State, theme: &Theme, help_view: &HelpView, y: u16) {
+fn render_help_view(
+    frame: &mut Frame,
+    state: &State,
+    theme: &Theme,
+    help_view: &HelpView,
+    layout: &Layout,
+) {
     let style = &theme.help_view;
 
     for (i, (keys, action, scope)) in HELP.iter().skip(help_view.cur_line_ix).enumerate() {
-        let y = y + i as u16;
-        if y >= state.term_size[1] {
+        let y = layout.content_top_line() + i as u16;
+        if y > layout.content_bottom_line() {
             break;
         }
         let (s_keys, s_action, s_scope) = if i == 0 {
