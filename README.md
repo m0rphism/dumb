@@ -7,6 +7,8 @@ highlights the disk usage caused by each entry.
 
 Useful for exploring what eats up all that disk space.
 
+![Screenshot](.github/assets/dumb-file-tree.jpg)
+
 ## Core Features
 
 - **Concurrency.**
