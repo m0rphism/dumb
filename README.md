@@ -5,7 +5,7 @@ An interactive TUI version of the standard unix `du` program written in Rust.
 Recursively scans a directory and presents an interactive file tree that
 highlights the disk usage caused by each entry.
 
-Useful for exploring what eats up all that disk space.
+Useful for exploring what eats up all that disk space and deleting files in one go.
 
 ## Screenshot
 
