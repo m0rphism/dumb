@@ -209,8 +209,7 @@ fn handle_key_event(
                 KeyCode::Char('h') | KeyCode::Left => state.file_view.leave_subdir(),
                 KeyCode::Char('l') | KeyCode::Right => {
                     let file_tree = state.file_tree.lock().unwrap();
-                    let entries =
-                        sorted_cache.entries(&file_tree, &state.root_dir, &state.file_view);
+                    let entries = sorted_cache.entries(&file_tree, &state.file_view);
                     match entries.get(state.file_view.cur_entry_ix()) {
                         Some(entry) if entry.is_dir => {
                             state.file_view.enter_subdir(&entry.name);
@@ -284,8 +283,7 @@ fn handle_key_event(
                 ),
                 KeyCode::Char('e') => {
                     let file_tree = state.file_tree.lock().unwrap();
-                    let children =
-                        sorted_cache.entries(&file_tree, &state.root_dir, &state.file_view);
+                    let children = sorted_cache.entries(&file_tree, &state.file_view);
                     if let Some(entry) = children.get(state.file_view.cur_entry_ix()) {
                         let cur_path = state.file_view.cur_subdir.join(&*entry.name);
                         let errors: Vec<_> = file_tree
@@ -701,7 +699,7 @@ impl State {
     pub fn cur_entry(&self, sorted_cache: &mut SortedCache) -> Option<(Box<OsString>, Inode)> {
         let file_tree = self.file_tree.lock().unwrap();
         sorted_cache
-            .entries(&file_tree, &self.root_dir, &self.file_view)
+            .entries(&file_tree, &self.file_view)
             .get(self.file_view.cur_entry_ix())
             .map(|entry| (entry.name.clone(), entry.inode))
     }

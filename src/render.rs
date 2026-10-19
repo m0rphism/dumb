@@ -44,13 +44,11 @@ pub struct FileEntry {
     pub size: u64,
 }
 
-pub fn sorted_entries(file_tree: &FileTree, root_dir: &Path, fv: &FileView) -> Vec<FileEntry> {
+pub fn sorted_entries(file_tree: &FileTree, fv: &FileView) -> Vec<FileEntry> {
     let children = &file_tree.get(&fv.cur_subdir).unwrap().children;
     let mut children = children
         .iter()
         .map(|(name, node)| {
-            let path = root_dir.join(&fv.cur_subdir).join(name);
-            let is_dir = path.is_dir() && !path.is_symlink();
             let inode = *file_tree.inodes.get(&node.inode_id).unwrap();
             let size = match fv.size_metric {
                 SizeMetric::Naive => {
@@ -75,7 +73,7 @@ pub fn sorted_entries(file_tree: &FileTree, root_dir: &Path, fv: &FileView) -> V
                 node_state: node.state.clone(),
                 num_child_errors: node.num_child_errors,
                 inode,
-                is_dir,
+                is_dir: inode.is_dir,
                 size,
             }
         })
@@ -130,7 +128,6 @@ impl SortedCache {
     pub fn entries<'a, 'b>(
         &'b mut self,
         file_tree: &'a FileTree,
-        root_dir: &'a Path,
         fv: &'a FileView,
     ) -> &'b [FileEntry] {
         let stale = self.version != file_tree.version
@@ -146,7 +143,7 @@ impl SortedCache {
         self.sort_by = fv.sort_by;
         self.sort_dirs_before_files = fv.sort_dirs_before_files;
         self.size_metric = fv.size_metric;
-        self.entries = sorted_entries(file_tree, root_dir, fv);
+        self.entries = sorted_entries(file_tree, fv);
         &self.entries
     }
 }
@@ -453,7 +450,7 @@ fn render_file_tree(
     }
 
     // Rows
-    let children = sorted_cache.entries(file_tree, &state.root_dir, &state.file_view);
+    let children = sorted_cache.entries(file_tree, &state.file_view);
     let skip = i64::max(
         0,
         state.file_view.cur_entry_ix() as i64 - (layout.num_content_lines() as i64 / 2),
