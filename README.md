@@ -48,15 +48,6 @@ Useful for exploring what eats up all that disk space.
   Pressing `E` displays all errors. Pressing `e` on a file entry displays only
   the errors that occured while scanning this particular entry.
 
-## Contributing
-
-I am generally open for contributions, but ask that you adhere to a single rule:
-
-> **Issues and pull request must start with at least one human written paragraph,
-> and AI generated text and code must be clearly highlighted as such.**
-
-Pure slop issues/pull requests might be closed without any response.
-
 ## Limitations
 
 - Unix-only as `std::os::unix::fs::MetadataExt` is used.
@@ -73,3 +64,13 @@ Pure slop issues/pull requests might be closed without any response.
     filesystem has written their data back.
   - Pseudo filesystems and some network or FUSE mounts (e.g. CIFS/SMB)
     may report zero or approximate block counts.
+
+## Contributing
+
+I am generally open for contributions, but ask that you adhere to a single rule:
+
+> **Issues and pull request must start with at least one human written paragraph,
+> and AI generated text and code must be clearly highlighted as such.**
+
+Pure slop issues/pull requests might be closed without any response.
+
