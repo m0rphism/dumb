@@ -44,6 +44,8 @@ Useful for exploring what eats up all that disk space and deleting files in one 
 
 - **TOML config and themes.**
   Many behaviors can be customized and virtually everything can be themed.
+  See [`config.default.toml`](config.default.toml) and [`theme.default.toml`](theme.default.toml)
+  for all available settings with default values and their documentation.
   If you are missing a config/theme option feel free to open an issue.
 
 - **Error Display.**
