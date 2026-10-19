@@ -40,7 +40,7 @@ Useful for exploring what eats up all that disk space.
   If you are missing a config/theme option feel free to open an issue.
 
 - **Error Display.**
-  File entries which could not be scanned, e.g. missing permissions to access a
+  File entries which could not be scanned, e.g. due to missing permissions to access a
   subdirectory, are highlighted in the file tree. The total error count is
   displayed in the header line.
   Pressing `E` displays all errors. Pressing `e` on a file entry displays only
