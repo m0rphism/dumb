@@ -20,9 +20,9 @@ pub struct Theme {
     pub help_view: HelpView,
     #[serde_inline_default(DeleteDialog::default())]
     pub delete_dialog: DeleteDialog,
-    #[serde_inline_default([0.2, 0.2, 0.2])]
+    #[serde_inline_default([0.3, 0.3, 0.3])]
     pub size_min_color: Color,
-    #[serde_inline_default([1.0, 0.2, 0.2])]
+    #[serde_inline_default([1.0, 0.3, 0.3])]
     pub size_max_color: Color,
 }
 

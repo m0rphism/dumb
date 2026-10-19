@@ -17,8 +17,8 @@
 # Colors to interpolate between for relative sizes.
 # This can be overridden by defining fixed styles for `header.size_percent`,
 # `file_table.size_rel_value`, and `file_table.size_cur_value`.
-size_min_color = [0.2, 0.2, 0.2]
-size_max_color = [1.0, 0.2, 0.2]
+size_min_color = [0.3, 0.3, 0.3]
+size_max_color = [1.0, 0.3, 0.3]
 
 # Style of the header line (first line in the terminal)
 [header]
