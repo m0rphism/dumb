@@ -1,5 +1,10 @@
 # dumb
 
+[![crates.io version](https://img.shields.io/crates/v/dumb)](https://crates.io/crates/dumb)
+[![latest release](https://img.shields.io/github/v/release/m0rphism/dumb)](https://github.com/m0rphism/dumb/releases)
+[![release build](https://github.com/m0rphism/dumb/actions/workflows/release.yml/badge.svg)](https://github.com/m0rphism/dumb/actions/workflows/release.yml)
+[![license: MIT](https://img.shields.io/crates/l/dumb)](LICENSE)
+
 An interactive TUI version of the standard unix `du` program written in Rust.
 
 Recursively scans a directory and presents an interactive file tree that
