@@ -48,7 +48,7 @@ pub struct Header {
     #[serde_inline_default(Style::default().fg(C1))]
     pub size_total: Style,
 
-    /// Defaults to using a color between {`size_min_color`] and [`size_max_color`] depending on percentage.
+    /// Defaults to using a color between [`size_min_color`] and [`size_max_color`] depending on percentage.
     #[serde_inline_default(None)]
     pub size_percent: Option<Style>,
 
@@ -103,11 +103,11 @@ pub struct FileTable {
     #[serde_inline_default(Style::default())]
     pub size_abs_value: Style,
 
-    /// Defaults to using a color between {`size_min_color`] and [`size_max_color`] depending on percentage.
+    /// Defaults to using a color between [`size_min_color`] and [`size_max_color`] depending on percentage.
     #[serde_inline_default(None)]
     pub size_rel_value: Option<Style>,
 
-    /// Defaults to using a color between {`size_min_color`] and [`size_max_color`] depending on percentage.
+    /// Defaults to using a color between [`size_min_color`] and [`size_max_color`] depending on percentage.
     #[serde_inline_default(None)]
     pub size_cur_value: Option<Style>,
 
