@@ -2,6 +2,12 @@
 name = "dumb"
 version = "0.1.0"
 edition = "2024"
+description = "An interactive TUI version of the standard unix du program."
+license = "MIT"
+repository = "https://github.com/m0rphism/dumb"
+readme = "README.md"
+keywords = ["cli", "tui", "du", "disk-usage", "disk"]
+categories = ["command-line-utilities"]
 
 [dependencies]
 anyhow = { version = "1.0.104", features = ["backtrace"] }
