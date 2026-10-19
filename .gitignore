@@ -16,3 +16,8 @@ auto/
 
 # Misc
 .#*
+
+# Local tooling
+.envrc
+/release.py
+__pycache__/
