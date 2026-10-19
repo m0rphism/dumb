@@ -7,6 +7,8 @@ highlights the disk usage caused by each entry.
 
 Useful for exploring what eats up all that disk space.
 
+## Screenshot
+
 <p align="center">
   <img src=".github/assets/dumb-file-tree.jpg" alt="Screenshot" width="600">
 </p>
@@ -23,7 +25,7 @@ Useful for exploring what eats up all that disk space.
   In particular, this accounts for hardlinks and uses actual block sizes
   instead of the apparent sizes of files.
   In corner cases or exotic environments (e.g. network mounts) the size may be
-  slightly off, see the Limitations section for details.
+  slightly off, see [Limitations](#limitations) for details.
 
 - **Keybindings.**
   Both `vim` keybindings and regular keybindings are supported.
