@@ -72,6 +72,64 @@ Useful for exploring what eats up all that disk space and deleting files in one 
   - Pseudo filesystems and some network or FUSE mounts (e.g. CIFS/SMB)
     may report zero or approximate block counts.
 
+## Installation
+
+### From `crates.io`
+
+If you have a [rust toolchain](https://rustup.rs/) installed, you can simply run
+```sh
+cargo install dumb
+```
+to install `dumb` user-wide into `~/.cargo/bin`.
+
+### From Source
+
+The project has no dependencies beyond a rust toolchain that supports at least
+the 2024 Rust edition:
+- `cargo build --release` to build an optimized, statically linked binary in
+  `./target/release/dumb`;
+- `cargo install --path .` to install it user-wide into `~/.cargo/bin`; and
+- `cargo run -- [ARGS]` to build and run it in debug mode.
+
+If you are using `nix`, you can run `nix develop` to enter a devshell that
+provides a compatible rust toolchain and rust analyzer.
+
+### From Nix Flake
+
+If you are using the `nix` package manager, then you can make use of the
+provided [`flake.nix`](flake.nix) file.
+
+To run `dumb` for testing:
+```sh
+nix run github:m0rphism/dumb         # builds and runs the master branch
+nix run github:m0rphism/dumb/v0.1.0  # builds and runs a specific tag
+```
+
+To install it permanently:
+- If you do not use NixOS, then you can install `dumb` into your nix profile via
+  ```sh
+  nix profile install github:m0rphism/dumb
+  ```
+- If you have a flake-based NixOS configuration, then add the input
+  ```nix
+  dumb = {
+    url = "github:m0rphism/dumb";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
+  ```
+  to your flake, and `dumb.packages.x86_64-linux.default` to your package set.
+
+- If you have a classic NixOS configuration, then add the following lines to
+  your `configuration.nix` file:
+  ```nix
+  # Make sure nix flakes are enabled
+  nix.settings.experimental-features = [ "nix-command" "flakes" ];
+  # Add the `dumb` flake as a package
+  environment.systemPackages = [
+    (builtins.getFlake "github:m0rphism/dumb").packages.${pkgs.system}.default
+  ];
+  ```
+
 ## Contributing
 
 I am generally open for contributions, but ask that you adhere to a single rule:
