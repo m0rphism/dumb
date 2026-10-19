@@ -7,7 +7,9 @@ highlights the disk usage caused by each entry.
 
 Useful for exploring what eats up all that disk space.
 
-![Screenshot](.github/assets/dumb-file-tree.jpg)
+<p align="center">
+  <img src=".github/assets/dumb-file-tree.jpg" alt="Screenshot" width="600">
+</p>
 
 ## Core Features
 
