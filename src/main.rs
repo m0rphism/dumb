@@ -62,7 +62,7 @@ fn main() -> ExitCode {
 fn run() -> Result<()> {
     let args = Args::parse();
 
-    let (config, theme) = load_config_and_theme(&args.config)?;
+    let (config, theme, config_warning) = load_config_and_theme(&args.config)?;
 
     let root_dir = match args.root_dir {
         Some(path) => path,
@@ -167,6 +167,14 @@ fn run() -> Result<()> {
     //     .filter_map(|e| e.ok().map(|e| e.file_name()))
     //     .collect(),
     // state.cur_subdir_entries.sort();
+    let initial_status = config_warning.or_else(|| {
+        if config.initial_statusbar_message.is_empty() {
+            None
+        } else {
+            Some(config.initial_statusbar_message.clone())
+        }
+    });
+
     let mut state = State {
         file_tree,
         tree_version: tree_version.clone(),
@@ -178,11 +186,7 @@ fn run() -> Result<()> {
         display_mode: DisplayMode::FileTree,
         help_return_mode: DisplayMode::FileTree,
         help_meta: HelpMeta::new(),
-        status: if config.initial_statusbar_message.is_empty() {
-            None
-        } else {
-            Some(config.initial_statusbar_message.clone())
-        },
+        status: initial_status,
     };
 
     let mut stdout = stdout();
@@ -511,7 +515,9 @@ fn handle_key_event(
     Some(redraw)
 }
 
-fn load_config_and_theme(config_path: &Option<PathBuf>) -> Result<(Config, Theme)> {
+fn load_config_and_theme(
+    config_path: &Option<PathBuf>,
+) -> Result<(Config, Theme, Option<String>)> {
     let (config_dir, config_path) = if let Some(config_path) = config_path {
         let config_path = config_path
             .canonicalize()
@@ -531,8 +537,11 @@ fn load_config_and_theme(config_path: &Option<PathBuf>) -> Result<(Config, Theme
         (config_dir, config_path)
     };
 
+    let config_warning = (config_dir.exists() && !config_path.exists())
+        .then(|| "Warning: config directory exists but contains no config.toml file.".to_string());
+
     let config = {
-        if !config_dir.exists() {
+        if !config_path.exists() {
             Config::default()
         } else {
             let content = std::fs::read_to_string(&config_path)
@@ -559,7 +568,7 @@ fn load_config_and_theme(config_path: &Option<PathBuf>) -> Result<(Config, Theme
         }
     };
 
-    Ok((config, theme))
+    Ok((config, theme, config_warning))
 }
 
 #[derive(Debug)]
