@@ -21,6 +21,9 @@ pub struct Config {
     #[serde_inline_default(true)]
     pub default_show_size_cur_column: bool,
 
+    #[serde_inline_default(true)]
+    pub default_show_modtime_column: bool,
+
     #[serde_inline_default(0)]
     pub default_name_column_width: u64,
 

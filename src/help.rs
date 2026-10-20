@@ -23,6 +23,7 @@ pub const HELP: &[(&str, &str, &str)] = &[
     ),
     ("m", "Next size metric (freed-by-deletion/naive)", "files"),
     ("c", "Toggle the Size Cur column", "files"),
+    ("M", "Toggle the Last Modified column", "files"),
     ("+", "Increase the width of the Name column", "files"),
     ("-", "Decrease the width of the Name column", "files"),
     (

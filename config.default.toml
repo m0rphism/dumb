@@ -25,6 +25,10 @@ default_size_metric = "freed"
 # Can be toggled at runtime by pressing `c`.
 default_show_size_cur_column = true
 
+# Whether to show the `Last Modified` column by default.
+# Can be toggled at runtime by pressing `M`.
+default_show_modtime_column = true
+
 # Initial width of the Name column in the file tree.
 # 0 means that the column automatically takes the leftover terminal width
 # after all other columns. Can be changed at runtime with `+` and `-`, which

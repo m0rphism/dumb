@@ -111,7 +111,7 @@ impl Column {
 }
 
 /// The columns of the file table in display order for a given display state.
-pub fn table_columns(show_size_cur: bool) -> Vec<Column> {
+pub fn table_columns(show_size_cur: bool, show_modtime: bool) -> Vec<Column> {
     let mut cols = Vec::new();
     cols.push(Column::Name);
     cols.push(Column::SizeAbs);
@@ -119,7 +119,9 @@ pub fn table_columns(show_size_cur: bool) -> Vec<Column> {
     if show_size_cur {
         cols.push(Column::SizeCur);
     }
-    cols.push(Column::ModTime);
+    if show_modtime {
+        cols.push(Column::ModTime);
+    }
     cols
 }
 
@@ -132,8 +134,8 @@ pub fn columns_width(cols: &[Column], name_col_width: u16) -> u16 {
 /// The total width consumed by all columns other than the Name column,
 /// including the gaps between the columns. This determines how much terminal
 /// width is left for the auto-sized Name column.
-pub fn fixed_columns_width(show_size_cur: bool) -> i64 {
-    columns_width(&table_columns(show_size_cur), 0) as i64
+pub fn fixed_columns_width(show_size_cur: bool, show_modtime: bool) -> i64 {
+    columns_width(&table_columns(show_size_cur, show_modtime), 0) as i64
 }
 
 fn render_header(
@@ -293,6 +295,7 @@ fn render_file_tree(
 ) {
     let ri = &snapshot.header;
     let show_size_cur = state.file_view.show_size_cur();
+    let show_modtime = state.file_view.show_modtime_column;
     let name_col_width = if state.file_view.name_col_width > 0 {
         state.file_view.name_col_width
     } else {
@@ -300,7 +303,7 @@ fn render_file_tree(
             .file_view
             .auto_name_col_width(state.term_size[0] as i64)
     } as u16;
-    let cols = table_columns(show_size_cur);
+    let cols = table_columns(show_size_cur, show_modtime);
 
     // Header
     let style = &theme.file_table;

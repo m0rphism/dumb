@@ -353,6 +353,10 @@ fn handle_key_event(
                     state.file_view.show_size_cur_column = !state.file_view.show_size_cur_column;
                     true
                 }
+                KeyCode::Char('M') => {
+                    state.file_view.show_modtime_column = !state.file_view.show_modtime_column;
+                    true
+                }
                 KeyCode::Char('+') => state.file_view.adjust_name_col_width(
                     1,
                     state.term_size[0] as i64,
@@ -591,6 +595,8 @@ pub struct FileView {
     /// Whether to display the "Size Cur" column in the file tree view (only relevant if the file
     /// tree view is currently in a subdirectory of [`State::root_dir`].
     pub show_size_cur_column: bool,
+    /// Whether to display the "Last Modified" column in the file tree view.
+    pub show_modtime_column: bool,
     /// The width of the name column in the file tree view. If set to 0, the name column is
     /// auto-sized, i.e. it fills the entire left-over width from the other columns.
     pub name_col_width: i64,
@@ -607,6 +613,7 @@ impl FileView {
             size_metric: config.default_size_metric,
             sort_dirs_before_files: true,
             show_size_cur_column: config.default_show_size_cur_column,
+            show_modtime_column: config.default_show_modtime_column,
             name_col_width: if config.default_name_column_width == 0 {
                 0
             } else {
@@ -687,7 +694,7 @@ impl FileView {
     }
 
     pub fn auto_name_col_width(&self, term_width: i64) -> i64 {
-        let leftover = term_width - fixed_columns_width(self.show_size_cur());
+        let leftover = term_width - fixed_columns_width(self.show_size_cur(), self.show_modtime_column);
         let w = if self.max_name_column_width > 0 {
             leftover.min(self.max_name_column_width)
         } else {
