@@ -47,7 +47,7 @@ size_max_color = [1.0, 0.3, 0.3]
   # Style for the value after the `Sort by` label.
   sort_mode = { fg = [0.4, 0.5, 1.0] }
 
-  # Style for the size metric indicator (e.g. `[freed]`) displayed after the size.
+  # Style for the value after the `Metric` label.
   size_metric = { fg = [0.4, 0.5, 1.0] }
 
   # Style for the scan error count (only displayed if there are actually errors).

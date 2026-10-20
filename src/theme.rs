@@ -55,8 +55,8 @@ pub struct Header {
     #[serde_inline_default(Style::default().fg(C1))]
     pub sort_mode: Style,
 
-    /// Style of the size metric indicator (e.g. `[freed]`) displayed after
-    /// the size.
+    /// Style of the size metric value (e.g. `freed`) displayed after the
+    /// size.
     #[serde_inline_default(Style::default().fg(C1))]
     pub size_metric: Style,
 

@@ -9,9 +9,9 @@ use crossterm::style::Color;
 
 use crate::{
     DisplayMode, ErrorView, HelpView, State,
-    config::{Config, HeaderLayout},
+    config::Config,
     file_tree::FileState,
-    frame::{Frame, LineWriter},
+    frame::Frame,
     help::HELP,
     layout::Layout,
     snapshot::Snapshot,
@@ -154,22 +154,44 @@ fn render_header(
     let ri = &snapshot.header;
     let mut line = frame.line(0);
 
-    // Current Directory
-    let prefix_str = display_path_prefix(&state.root_dir, config.display_home_as_tilde);
+    // Path
+    let prefix_str = display_path_prefix(&state.root_dir, &config);
     let suffix_str = state.file_view.cur_subdir.to_string_lossy();
+    let path_str = if suffix_str.is_empty() {
+        format!("{prefix_str}/")
+    } else {
+        format!("{prefix_str}/{suffix_str}/")
+    };
 
-    if state.header_layout == HeaderLayout::MultiLine {
-        line.text(&style.label, "Cur Dir:  ");
+    let path_label = "Path: ";
+    let max_line_len = state.term_size[0]
+        .saturating_sub(path_label.len() as u16)
+        .max(1) as usize;
+    let mut prefix_chars_left = prefix_str.chars().count();
+    for (i, path_line) in wrap_path(&path_str, max_line_len).into_iter().enumerate() {
+        if i == 0 {
+            line.text(&style.label, path_label);
+        } else {
+            line.spaces(&style.label, path_label.len());
+        }
+        // Apply the prefix/suffix styles to the parts of the line that belong
+        // to the respective part of the path.
+        let n_prefix = path_line.chars().count().min(prefix_chars_left);
+        let chars: Vec<char> = path_line.chars().collect();
+        let prefix_part: String = chars[..n_prefix].iter().collect();
+        let suffix_part: String = chars[n_prefix..].iter().collect();
+        if !prefix_part.is_empty() {
+            line.text(&style.path_prefix, &prefix_part);
+        }
+        if !suffix_part.is_empty() {
+            line.text(&style.path_suffix, &suffix_part);
+        }
+        prefix_chars_left = prefix_chars_left.saturating_sub(n_prefix);
+        line.next_line();
     }
-    line.text(&style.path_prefix, prefix_str.as_ref());
-    line.text(&style.path_prefix, "/");
-    line.text(&style.path_suffix, suffix_str.as_ref());
-    next_field(&mut line, &style.label, state.header_layout);
 
     // Size
-    if state.header_layout == HeaderLayout::MultiLine {
-        line.text(&style.label, "Size:     ");
-    }
+    line.text(&style.label, "Size: ");
     if state.file_view.cur_subdir.to_string_lossy().is_empty() {
         let root_dir_size_str = bytes_to_str(ri.root_dir_size);
         line.text(&style.size_total, &root_dir_size_str);
@@ -194,67 +216,79 @@ fn render_header(
         }
         line.text(&style.label, ")");
     }
-    line.text(&style.label, " [");
+
+    // Size Metric
+    line.text(&style.label, "  Metric: ");
     line.text(&style.size_metric, snapshot.params.size_metric.as_str());
-    line.text(&style.label, "]");
-    next_field(&mut line, &style.label, state.header_layout);
 
     // Sort Mode
-    match state.header_layout {
-        HeaderLayout::SingleLine => line.text(&style.label, "Sort by "),
-        HeaderLayout::MultiLine => line.text(&style.label, "Sort by:  "),
-    }
+    line.text(&style.label, "  Sort by ");
     line.text(&style.sort_mode, &format!("{:?}", snapshot.params.sort_by));
 
     // Errors
     if ri.num_errors > 0 {
-        next_field(&mut line, &style.label, state.header_layout);
-        match state.header_layout {
-            HeaderLayout::SingleLine => {
-                let err_str = if ri.num_errors == 1 {
-                    "error"
-                } else {
-                    "errors"
-                };
-                line.text(&style.error, &format!("{} {}", ri.num_errors, err_str));
-            }
-            HeaderLayout::MultiLine => {
-                line.text(&style.label, "Errors:   ");
-                line.text(&style.error, &format!("{}", ri.num_errors));
-            }
-        }
+        let err_str = if ri.num_errors == 1 {
+            "error"
+        } else {
+            "errors"
+        };
+        line.text(&style.label, "  ");
+        line.text(&style.error, &format!("{} {}", ri.num_errors, err_str));
     }
 
     // Spinner
     if matches!(ri.root_dir_state, FileState::Queued) {
-        next_field(&mut line, &style.label, state.header_layout);
+        line.text(&style.label, "  ");
         line.text(&style.spinner, spinner(state.spinner_frame));
     }
 
     line.y() + 1
 }
 
-/// Replace `$HOME` with `~` if the corresponding option is set.
-fn display_path_prefix(path: &Path, display_home_as_tilde: bool) -> String {
-    if display_home_as_tilde
-        && let Some(home) = dirs::home_dir()
-        && let Ok(rest) = path.strip_prefix(&home)
-    {
-        if rest.as_os_str().is_empty() {
-            "~".to_string()
+fn display_path_prefix(path: &Path, config: &Config) -> String {
+    if config.display_prefix_path {
+        if config.display_home_as_tilde
+            && let Some(home) = dirs::home_dir()
+            && let Ok(rest) = path.strip_prefix(&home)
+        {
+            if rest.as_os_str().is_empty() {
+                "~".to_string()
+            } else {
+                format!("~/{}", rest.to_string_lossy())
+            }
         } else {
-            format!("~/{}", rest.to_string_lossy())
+            path.to_string_lossy().into_owned()
         }
     } else {
-        path.to_string_lossy().into_owned()
+        "…".to_string()
     }
 }
 
-fn next_field(line: &mut LineWriter, label: &Style, layout: HeaderLayout) {
-    match layout {
-        HeaderLayout::SingleLine => line.spaces(label, 2),
-        HeaderLayout::MultiLine => line.next_line(),
+/// Wraps `path` into lines of at most `max_line_len` chars, preferring to
+/// break after a '/' character and falling back to a character boundary if a
+/// single path component is too long to fit.
+fn wrap_path(path: &str, max_line_len: usize) -> Vec<String> {
+    assert!(max_line_len > 0, "max_line_len must be greater than 0");
+    let chars: Vec<char> = path.chars().collect();
+    let mut lines = Vec::new();
+    let mut start = 0;
+    while start < chars.len() {
+        let end_limit = (start + max_line_len).min(chars.len());
+        if end_limit == chars.len() {
+            lines.push(chars[start..].iter().collect());
+            break;
+        }
+        let mut cut = end_limit;
+        for i in ((start + 1)..end_limit).rev() {
+            if chars[i] == '/' {
+                cut = i + 1;
+                break;
+            }
+        }
+        lines.push(chars[start..cut].iter().collect());
+        start = cut;
     }
+    lines
 }
 
 fn render_file_tree(

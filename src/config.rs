@@ -12,9 +12,6 @@ pub struct Config {
     #[serde_inline_default(None)]
     pub theme: Option<PathBuf>,
 
-    #[serde_inline_default(HeaderLayout::SingleLine)]
-    pub default_header_layout: HeaderLayout,
-
     #[serde_inline_default(SortBy::Size)]
     pub default_sort_mode: SortBy,
 
@@ -30,6 +27,9 @@ pub struct Config {
     #[serde_inline_default(true)]
     pub display_home_as_tilde: bool,
 
+    #[serde_inline_default(true)]
+    pub display_prefix_path: bool,
+
     #[serde_inline_default(0)]
     pub max_name_column_width: u64,
 
@@ -38,22 +38,6 @@ pub struct Config {
 
     #[serde_inline_default(true)]
     pub require_delete_confirmation: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum HeaderLayout {
-    SingleLine,
-    MultiLine,
-}
-
-impl HeaderLayout {
-    pub fn next(self) -> Self {
-        match self {
-            HeaderLayout::SingleLine => HeaderLayout::MultiLine,
-            HeaderLayout::MultiLine => HeaderLayout::SingleLine,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize)]

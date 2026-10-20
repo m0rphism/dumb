@@ -34,7 +34,7 @@ use crossterm::{
 
 use crate::{
     args::Args,
-    config::{Config, HeaderLayout, SizeMetric, SortBy},
+    config::{Config, SizeMetric, SortBy},
     file_tree::FileTree,
     help::{HELP, HelpMeta},
     layout::Layout,
@@ -175,7 +175,6 @@ fn run() -> Result<()> {
         term_size,
         layout: Layout::new(term_size, 1),
         spinner_frame: 0,
-        header_layout: config.default_header_layout,
         display_mode: DisplayMode::FileTree,
         help_return_mode: DisplayMode::FileTree,
         help_meta: HelpMeta::new(),
@@ -339,10 +338,6 @@ fn handle_key_event(
                     state.file_view.sort_dirs_before_files =
                         !state.file_view.sort_dirs_before_files;
                     let _ = build_sender.send(state.file_view.params());
-                    true
-                }
-                KeyCode::Char('L') => {
-                    state.header_layout = state.header_layout.next();
                     true
                 }
                 KeyCode::Char('m') => {
@@ -803,8 +798,6 @@ pub struct State {
     pub help_return_mode: DisplayMode,
     /// Cached data for rendering the help view.
     pub help_meta: HelpMeta,
-    /// How the header should be rendered.
-    pub header_layout: HeaderLayout,
     /// The message that should be displayed in a status bar at the bottom.
     pub status: Option<String>,
 }

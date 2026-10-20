@@ -6,9 +6,6 @@
 # See `theme.default.toml` for available theming options.
 #theme = "theme.default.toml"
 
-# The layout for the header line. Can be either "single_line" or "multi_line".
-default_header_layout = "single_line"
-
 # Can be one of `name`, `size`, or `mod_time`.
 default_sort_mode = "size"
 
@@ -34,8 +31,12 @@ default_show_size_cur_column = true
 # also switch between auto width and a fixed width.
 default_name_column_width = 0
 
-# Whether the header should replace `$HOME` with `~` in the directory prefix.
+# Whether the header should replace `$HOME` with `~` in the current directory field.
 display_home_as_tilde = true
+
+# Whether the header should display the actual root directory (prefix of the
+# current directory), or a `…` placeholder instead.
+display_prefix_path = true
 
 # Maximum width chosen by the auto Name column width (i.e. if
 # default_name_column_width is 0). 0 means no maximum. The user can still

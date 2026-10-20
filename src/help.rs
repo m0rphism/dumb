@@ -21,11 +21,6 @@ pub const HELP: &[(&str, &str, &str)] = &[
         "Toggle sorting directories before files (only for sort by name)",
         "files",
     ),
-    (
-        "L",
-        "Next header layout mode (single line/multi line)",
-        "files",
-    ),
     ("m", "Next size metric (freed-by-deletion/naive)", "files"),
     ("c", "Toggle the Size Cur column", "files"),
     ("+", "Increase the width of the Name column", "files"),
