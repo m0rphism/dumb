@@ -16,7 +16,11 @@ use std::{
     os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
     process::ExitCode,
-    sync::{Arc, Mutex, mpsc::channel},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU64, Ordering},
+        mpsc::{self, channel},
+    },
     time::Duration,
 };
 
@@ -30,13 +34,16 @@ use crossterm::{
 use crate::{
     args::Args,
     config::{Config, HeaderLayout, SizeMetric, SortBy},
-    file_tree::{FileState, FileTree},
+    file_tree::FileTree,
     help::{HELP, HelpMeta},
     layout::Layout,
     motion::Motion,
     raw_mode::RawMode,
-    render::{SortedCache, fixed_columns_width, render_state},
-    scan::{Inode, scan},
+    render::{
+        FileEntry, RenderInfo, ViewParams, ViewSnapshot, capture_snapshot, fixed_columns_width,
+        render_state, sort_entries,
+    },
+    scan::scan,
     theme::Theme,
 };
 
@@ -70,9 +77,25 @@ fn run() -> Result<()> {
     let (sender, receiver) = channel();
     let (done_sender, done_receiver) = channel();
 
+    // The version of the file tree. This is used to check if the `ViewSnapshot` is stale.
+    // The version is kept outside of the file tree mutex such that it can be read lock-free.
+    //
+    // It is bumped under the tree lock whenever the file tree gets mutated, i.e. after
+    // - the file tree handled a `ScanEvent` sent by the scan thread
+    // - the user deleted a file via keybinding
+    //
+    // The purpose of the staleness checks is to prevent
+    // - a synchronous `ViewSnapshot` rebuild triggered by a deletion to be overwritten by an
+    //   asynchronous rebuild that was started before the deletion but arrived after the synchronous rebuild.
+    // - unnecessary `ViewSnapshot` rebuilds (although those are rare and practically only
+    //   happen with slow network mounts, where the file tree does not get updated between redraw
+    //   ticks)
+    let tree_version = Arc::new(AtomicU64::new(0));
+
     // Spawn thread that scans the `root_dir`.
     let _scan_handle = std::thread::spawn({
         let file_tree = file_tree.clone();
+        let tree_version = tree_version.clone();
         let root_dir = root_dir.clone();
         move || -> Result<()> {
             scan(
@@ -82,6 +105,7 @@ fn run() -> Result<()> {
                     scan_event
                         .map_path_bufs(|p| *p = p.strip_prefix(&root_dir).unwrap().to_path_buf());
                     file_tree.handle_scan_event(scan_event);
+                    tree_version.fetch_add(1, Ordering::Relaxed);
                     Ok(())
                 },
                 |p: &Path| {
@@ -94,7 +118,7 @@ fn run() -> Result<()> {
         }
     });
 
-    // Spawn thread that periodically sends redraw events until scan completed.
+    // Spawn thread that periodically sends redraw events until the scan completed.
     let _redraw_handle = std::thread::spawn({
         let sender = sender.clone();
         move || -> Result<()> {
@@ -119,6 +143,53 @@ fn run() -> Result<()> {
         }
     });
 
+    // Channel for requesting builds of the view snapshot.
+    let (build_sender, build_receiver) = channel::<BuildRequest>();
+
+    // Spawn the snapshot builder thread, which takes build requests and sends the
+    // built `ViewSnapshot`s to the main event handler as `Event::SnapshotReady`.
+    //
+    // Builds are requested by the 500 ms redraw tick (if the tree version advanced since the
+    // published snapshot), on scan completion, and by changes to sort order or size metric.
+    //
+    // Deletions and changes to the current directory do not go through this path, and
+    // instead build the `ViewSnapshot` synchronously.
+    //
+    // The purpose of this thread is to keep the expensive snapshot+sort work off the main thread,
+    // which would otherwise be hurt TUI responsiveness when viewing a large directory while it is
+    // being scanned.
+    let _builder_handle = std::thread::spawn({
+        let file_tree = file_tree.clone();
+        let tree_version = tree_version.clone();
+        let sender = sender.clone();
+        move || {
+            while let Ok(mut request) = build_receiver.recv() {
+                // Only the most recent request is relevant.
+                while let Ok(newer) = build_receiver.try_recv() {
+                    request = newer;
+                }
+
+                let params = request.params;
+
+                // Take a consistent snapshot under the tree lock. If the subdirectory no longer
+                // exists (e.g. it was deleted after the request was made), drop the request.
+                let mut snapshot = {
+                    let file_tree = file_tree.lock().unwrap();
+                    match capture_snapshot(&file_tree, &tree_version, &params) {
+                        Some(snapshot) => snapshot,
+                        None => continue,
+                    }
+                };
+
+                sort_entries(&mut snapshot.entries, &params);
+
+                if sender.send(Event::SnapshotReady(snapshot)).is_err() {
+                    break;
+                }
+            }
+        }
+    });
+
     let term_size = {
         let (w, h) = terminal::size()?;
         [w, h]
@@ -131,6 +202,7 @@ fn run() -> Result<()> {
     // state.cur_subdir_entries.sort();
     let mut state = State {
         file_tree,
+        tree_version: tree_version.clone(),
         file_view: FileView::new(&config),
         root_dir,
         term_size,
@@ -142,18 +214,29 @@ fn run() -> Result<()> {
         help_meta: HelpMeta::new(),
         status: None,
     };
-    let mut sorted_cache = SortedCache::default();
 
     let mut stdout = stdout();
     let _raw_mode = RawMode::enter()?;
-    state.layout = render_state(&mut stdout, &state, &mut sorted_cache, &theme)?;
+
+    // Improve perceived startup time by giving the scanner a brief moment to deliver the first entries.
+    std::thread::sleep(Duration::from_millis(50));
+
+    let mut snapshot = ViewSnapshot::default();
+    sync_rebuild(&state, &mut snapshot);
+    state.file_view.resolve_current_selection(&snapshot);
+    state.layout = render_state(&mut stdout, &state, &snapshot, &theme)?;
 
     for event in receiver {
-        // println!("Received: {event:?}");
         let redraw = match event {
             Event::Term(event) => match event {
                 TermEvent::Key(key_event) => {
-                    match handle_key_event(&mut state, &mut sorted_cache, &config, key_event) {
+                    match handle_key_event(
+                        &mut state,
+                        &mut snapshot,
+                        &config,
+                        key_event,
+                        &build_sender,
+                    ) {
                         Some(redraw) => redraw,
                         None => break,
                     }
@@ -170,23 +253,82 @@ fn run() -> Result<()> {
             },
             Event::Redraw => {
                 state.spinner_frame += 1;
+                // Request a new `ViewSnapshot` if the tree advanced since previous snapshot.
+                if tree_version.load(Ordering::Relaxed) != snapshot.version {
+                    let _ = build_sender.send(BuildRequest {
+                        params: state.file_view.params(),
+                    });
+                }
+                true
+            }
+            Event::SnapshotReady(new) => {
+                // Use the new snapshot only if it matches the current view and is not older than the
+                // current snapshot. Without this check, it could happen that a synchronous snapshot
+                // update, e.g. when the user changed the directory, is overwritten by a delayed
+                // asynchronous snapshot.
+                if new.params == state.file_view.params() && new.version >= snapshot.version {
+                    snapshot = new;
+                    state.file_view.resolve_current_selection(&snapshot);
+                }
                 true
             }
         };
         if redraw {
-            state.layout = render_state(&mut stdout, &state, &mut sorted_cache, &theme)?;
+            state.layout = render_state(&mut stdout, &state, &snapshot, &theme)?;
         }
     }
 
     Ok(())
 }
 
+/// A request to the snapshot builder thread for building a `ViewSnapshot` for a set of `ViewParams`.
+#[derive(Debug, Clone)]
+struct BuildRequest {
+    params: ViewParams,
+}
+
+/// Rebuild the snapshot synchronously for the currently viewed subdirectory.
+///
+/// Used on startup, on changes to the current directory, and after a deletion, i.e. exactly when
+/// the user expects the displayed list to change immediately.
+///
+/// This is the only place where the main thread takes the file tree lock.
+fn sync_rebuild(state: &State, snapshot: &mut ViewSnapshot) {
+    let params = state.file_view.params();
+    let mut new = {
+        let file_tree = state.file_tree.lock().unwrap();
+        match capture_snapshot(&file_tree, &state.tree_version, &params) {
+            Some(snapshot) => snapshot,
+            // The current directory no longer exists (potentially deleted outside of dumb), so set
+            // an empty snapshot for it.
+            None => ViewSnapshot {
+                built: true,
+                version: state.tree_version.load(Ordering::Relaxed),
+                params: params.clone(),
+                entries: vec![],
+                header: RenderInfo {
+                    cur_dir_size: 0,
+                    root_dir_size: match params.size_metric {
+                        SizeMetric::Freed => file_tree.root.freed_size,
+                        SizeMetric::Naive => file_tree.root.naive_size,
+                    },
+                    root_dir_state: file_tree.root.state.clone(),
+                    num_errors: file_tree.errors.len(),
+                },
+            },
+        }
+    };
+    sort_entries(&mut new.entries, &params);
+    *snapshot = new;
+}
+
 /// Returns `None` if the program should quit, or `Some(should_redraw)`.
 fn handle_key_event(
     state: &mut State,
-    sorted_cache: &mut SortedCache,
+    snapshot: &mut ViewSnapshot,
     config: &Config,
     key_event: KeyEvent,
+    build_sender: &mpsc::Sender<BuildRequest>,
 ) -> Option<bool> {
     let redraw = if key_event.kind != KeyEventKind::Release {
         // Any key press clears the status message.
@@ -196,67 +338,79 @@ fn handle_key_event(
         match &mut state.display_mode {
             DisplayMode::FileTree => match key_event.code {
                 KeyCode::Char('q') => return None,
-                KeyCode::Char('j') | KeyCode::Down => state.file_view.apply_motion(
-                    Motion::Down,
-                    state.cur_subdir_entry_len(),
-                    &layout,
-                ),
-                KeyCode::Char('k') | KeyCode::Up => {
+                KeyCode::Char('j') | KeyCode::Down => {
                     state
                         .file_view
-                        .apply_motion(Motion::Up, state.cur_subdir_entry_len(), &layout)
+                        .apply_motion(Motion::Down, &snapshot, &layout)
                 }
-                KeyCode::Char('h') | KeyCode::Left => state.file_view.leave_subdir(),
-                KeyCode::Char('l') | KeyCode::Right => {
-                    let file_tree = state.file_tree.lock().unwrap();
-                    let entries = sorted_cache.entries(&file_tree, &state.file_view);
-                    match entries.get(state.file_view.cur_entry_ix()) {
-                        Some(entry) if entry.is_dir => {
-                            state.file_view.enter_subdir(&entry.name);
-                            true
-                        }
-                        _ => false,
+                KeyCode::Char('k') | KeyCode::Up => {
+                    state.file_view.apply_motion(Motion::Up, &snapshot, &layout)
+                }
+                KeyCode::Char('h') | KeyCode::Left => {
+                    if state.file_view.leave_subdir() {
+                        sync_rebuild(state, snapshot);
+                        state.file_view.resolve_current_selection(&snapshot);
+                        true
+                    } else {
+                        false
                     }
                 }
-                KeyCode::Char('g') | KeyCode::Home => state.file_view.apply_motion(
-                    Motion::First,
-                    state.cur_subdir_entry_len(),
-                    &layout,
-                ),
-                KeyCode::Char('G') | KeyCode::End => state.file_view.apply_motion(
-                    Motion::Last,
-                    state.cur_subdir_entry_len(),
-                    &layout,
-                ),
+                KeyCode::Char('l') | KeyCode::Right => {
+                    if let Some((_, entry)) = state.file_view.cur_entry(snapshot)
+                        && entry.is_dir
+                    {
+                        let name = entry.name.clone();
+                        state.file_view.enter_subdir(&name);
+                        sync_rebuild(state, snapshot);
+                        state.file_view.resolve_current_selection(&snapshot);
+                        true
+                    } else {
+                        false
+                    }
+                }
+                KeyCode::Char('g') | KeyCode::Home => {
+                    state
+                        .file_view
+                        .apply_motion(Motion::First, &snapshot, &layout)
+                }
+                KeyCode::Char('G') | KeyCode::End => {
+                    state
+                        .file_view
+                        .apply_motion(Motion::Last, &snapshot, &layout)
+                }
                 KeyCode::Char('f') if key_event.modifiers == KeyModifiers::CONTROL => state
                     .file_view
-                    .apply_motion(Motion::PageDown, state.cur_subdir_entry_len(), &layout),
-                KeyCode::PageDown => state.file_view.apply_motion(
-                    Motion::PageDown,
-                    state.cur_subdir_entry_len(),
-                    &layout,
-                ),
+                    .apply_motion(Motion::PageDown, &snapshot, &layout),
+                KeyCode::PageDown => {
+                    state
+                        .file_view
+                        .apply_motion(Motion::PageDown, &snapshot, &layout)
+                }
                 KeyCode::Char('b') if key_event.modifiers == KeyModifiers::CONTROL => state
                     .file_view
-                    .apply_motion(Motion::PageUp, state.cur_subdir_entry_len(), &layout),
-                KeyCode::PageUp => state.file_view.apply_motion(
-                    Motion::PageUp,
-                    state.cur_subdir_entry_len(),
-                    &layout,
-                ),
+                    .apply_motion(Motion::PageUp, &snapshot, &layout),
+                KeyCode::PageUp => state
+                    .file_view
+                    .apply_motion(Motion::PageUp, &snapshot, &layout),
                 KeyCode::Char('d') if key_event.modifiers == KeyModifiers::CONTROL => state
                     .file_view
-                    .apply_motion(Motion::HalfPageDown, state.cur_subdir_entry_len(), &layout),
+                    .apply_motion(Motion::HalfPageDown, &snapshot, &layout),
                 KeyCode::Char('u') if key_event.modifiers == KeyModifiers::CONTROL => state
                     .file_view
-                    .apply_motion(Motion::HalfPageUp, state.cur_subdir_entry_len(), &layout),
+                    .apply_motion(Motion::HalfPageUp, &snapshot, &layout),
                 KeyCode::Char('s') => {
                     state.file_view.sort_by = state.file_view.sort_by.next();
+                    let _ = build_sender.send(BuildRequest {
+                        params: state.file_view.params(),
+                    });
                     true
                 }
                 KeyCode::Char('S') => {
                     state.file_view.sort_dirs_before_files =
                         !state.file_view.sort_dirs_before_files;
+                    let _ = build_sender.send(BuildRequest {
+                        params: state.file_view.params(),
+                    });
                     true
                 }
                 KeyCode::Char('L') => {
@@ -265,6 +419,9 @@ fn handle_key_event(
                 }
                 KeyCode::Char('m') => {
                     state.file_view.size_metric = state.file_view.size_metric.next();
+                    let _ = build_sender.send(BuildRequest {
+                        params: state.file_view.params(),
+                    });
                     true
                 }
                 KeyCode::Char('c') => {
@@ -274,19 +431,20 @@ fn handle_key_event(
                 KeyCode::Char('+') => state.file_view.adjust_name_col_width(
                     1,
                     state.term_size[0] as i64,
-                    state.is_scan_done(),
+                    snapshot.is_scan_done(),
                 ),
                 KeyCode::Char('-') => state.file_view.adjust_name_col_width(
                     -1,
                     state.term_size[0] as i64,
-                    state.is_scan_done(),
+                    snapshot.is_scan_done(),
                 ),
                 KeyCode::Char('e') => {
-                    let file_tree = state.file_tree.lock().unwrap();
-                    let children = sorted_cache.entries(&file_tree, &state.file_view);
-                    if let Some(entry) = children.get(state.file_view.cur_entry_ix()) {
+                    if let Some((_, entry)) = state.file_view.cur_entry(snapshot) {
                         let cur_path = state.file_view.cur_subdir.join(&*entry.name);
-                        let errors: Vec<_> = file_tree
+                        let errors: Vec<_> = state
+                            .file_tree
+                            .lock()
+                            .unwrap()
                             .errors
                             .iter()
                             .filter(|(path, _)| path.strip_prefix(&cur_path).is_ok())
@@ -333,11 +491,12 @@ fn handle_key_event(
                     }
                 }
                 KeyCode::Char('d') if config.enable_delete_binding => {
-                    if let Some(rel) = state.cur_entry_path(sorted_cache) {
+                    if let Some((_, entry)) = state.file_view.cur_entry(snapshot) {
+                        let rel_path = state.file_view.cur_subdir.join(&*entry.name);
                         if config.require_delete_confirmation {
-                            state.display_mode = DisplayMode::DeleteDialog(rel);
+                            state.display_mode = DisplayMode::DeleteDialog(rel_path);
                         } else {
-                            state.try_delete(&rel);
+                            state.try_delete(&rel_path, &mut *snapshot);
                         }
                     }
                     true
@@ -353,7 +512,7 @@ fn handle_key_event(
                 let target = target.clone();
                 state.display_mode = DisplayMode::FileTree;
                 if let KeyCode::Char('y' | 'Y') = key_event.code {
-                    state.try_delete(&target);
+                    state.try_delete(&target, &mut *snapshot);
                 }
                 true
             }
@@ -472,10 +631,14 @@ fn load_config_and_theme(config_path: &Option<PathBuf>) -> Result<(Config, Theme
     Ok((config, theme))
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub enum Event {
+    /// Terminal events
     Term(TermEvent),
+    /// Sent in a fixed interval by the redraw thread while the scan is running.
     Redraw,
+    /// Sent by the snapshot builder thread after building a snapshot.
+    SnapshotReady(ViewSnapshot),
 }
 
 #[derive(Debug, Clone)]
@@ -493,9 +656,9 @@ pub enum DisplayMode {
 pub struct FileView {
     /// The current subdirectory selected in the file tree view. Relative to [`State::root_dir`].
     pub cur_subdir: PathBuf,
-    /// The stack of file tree entry indexes. The last entry of the stack represents the index for
-    /// the currently selected file tree entry in [`FileView::cur_subdir`].
-    pub entry_ixs: Vec<usize>,
+    /// The name of the currently selected entry in [`FileView::cur_subdir`].
+    /// `None` if the current subdir has no entries.
+    pub selected: Option<OsString>,
     /// How the file tree view is sorted.
     pub sort_by: SortBy,
     /// The size-metric with which the entries of the file tree are displayed.
@@ -516,7 +679,7 @@ impl FileView {
     pub fn new(config: &Config) -> Self {
         Self {
             cur_subdir: PathBuf::new(),
-            entry_ixs: vec![0],
+            selected: None,
             sort_by: config.default_sort_mode,
             size_metric: config.default_size_metric,
             sort_dirs_before_files: true,
@@ -530,23 +693,50 @@ impl FileView {
         }
     }
 
-    pub fn cur_entry_ix(&self) -> usize {
-        *self.entry_ixs.last().unwrap()
+    /// The currently selected entry within the snapshot.
+    ///
+    /// Returns `None` if there is no selection (e.g. no entries in directory) or
+    /// if the selection could not be found in the snapshot's entry list.
+    pub fn cur_entry<'a>(&self, snapshot: &'a ViewSnapshot) -> Option<(usize, &'a FileEntry)> {
+        self.selected.as_ref().and_then(|name| {
+            snapshot
+                .entries
+                .iter()
+                .enumerate()
+                .find(|(_, e)| e.name.as_os_str() == name.as_os_str())
+        })
     }
-    pub fn cur_entry_ix_mut(&mut self) -> &mut usize {
-        self.entry_ixs.last_mut().unwrap()
+
+    /// Set the current selection to the first entry if it was previously `None`.
+    pub fn resolve_current_selection(&mut self, snapshot: &ViewSnapshot) {
+        if self.selected.is_none()
+            && let Some(first) = snapshot.entries.first()
+        {
+            self.selected = Some(first.name.as_ref().clone());
+        }
+    }
+
+    /// The view parameters that determine the snapshot.
+    pub fn params(&self) -> ViewParams {
+        ViewParams {
+            subdir: self.cur_subdir.clone(),
+            sort_by: self.sort_by,
+            sort_dirs_before_files: self.sort_dirs_before_files,
+            size_metric: self.size_metric,
+        }
     }
 
     pub fn enter_subdir(&mut self, name: &OsString) {
         self.cur_subdir = self.cur_subdir.join(name);
-        self.entry_ixs.push(0);
+        // The selection gets resolved after the snapshot is built.
+        self.selected = None;
     }
 
     pub fn leave_subdir(&mut self) -> bool {
         match self.cur_subdir.parent() {
             Some(p) => {
+                self.selected = Some(self.cur_subdir.file_name().unwrap().to_os_string());
                 self.cur_subdir = p.to_path_buf();
-                self.entry_ixs.pop();
                 true
             }
             None => false,
@@ -555,9 +745,23 @@ impl FileView {
 
     /// Apply the motion to the file list and return true iff the motion actually changed the
     /// selected entry.
-    pub fn apply_motion(&mut self, motion: Motion, num_entries: usize, layout: &Layout) -> bool {
-        let i = self.cur_entry_ix_mut();
-        motion.apply_check(i, num_entries, layout.num_file_list_lines() as usize)
+    pub fn apply_motion(
+        &mut self,
+        motion: Motion,
+        snapshot: &ViewSnapshot,
+        layout: &Layout,
+    ) -> bool {
+        let cur = self.cur_entry(snapshot).map(|(i, _)| i).unwrap_or(0);
+        let new = motion.apply(
+            cur,
+            snapshot.entries.len(),
+            layout.num_file_list_lines() as usize,
+        );
+        if new == cur {
+            return false;
+        }
+        self.selected = snapshot.entries.get(new).map(|e| e.name.as_ref().clone());
+        true
     }
 
     pub fn show_size_cur(&self) -> bool {
@@ -658,6 +862,8 @@ pub struct State {
     /// The file tree of the root directory. This is accessible by the main thread while it is being
     /// built by the scan thread.
     pub file_tree: Arc<Mutex<FileTree>>,
+    /// The version of the file tree (see its creation in `run`).
+    pub tree_version: Arc<AtomicU64>,
     /// The state of the file tree view.
     pub file_view: FileView,
     /// The current terminal size.
@@ -683,62 +889,50 @@ pub struct State {
 }
 
 impl State {
-    pub fn cur_subdir_entry_len(&self) -> usize {
-        self.file_tree
-            .lock()
-            .unwrap()
-            .get(&self.file_view.cur_subdir)
-            .map(|node| node.children.len())
-            .unwrap_or(0)
-    }
+    /// Try to delete the `root_dir`-relative entry at `rel` from the file system and from the file
+    /// tree, then rebuild `snapshot` synchronously so that the next frame no longer shows the
+    /// deleted entry, and update the selection.
+    pub fn try_delete(&mut self, rel: &Path, snapshot: &mut ViewSnapshot) {
+        let abs = self.root_dir.join(rel);
 
-    pub fn is_scan_done(&self) -> bool {
-        !matches!(self.file_tree.lock().unwrap().root.state, FileState::Queued)
-    }
-
-    pub fn cur_entry(&self, sorted_cache: &mut SortedCache) -> Option<(Box<OsString>, Inode)> {
-        let file_tree = self.file_tree.lock().unwrap();
-        sorted_cache
-            .entries(&file_tree, &self.file_view)
-            .get(self.file_view.cur_entry_ix())
-            .map(|entry| (entry.name.clone(), entry.inode))
-    }
-
-    /// `root_dir`-relative path of the currently selected entry.
-    pub fn cur_entry_path(&self, sorted_cache: &mut SortedCache) -> Option<PathBuf> {
-        let (name, _) = self.cur_entry(sorted_cache)?;
-        Some(self.file_view.cur_subdir.join(&*name))
-    }
-
-    pub fn try_delete(&mut self, rel: &Path) {
-        let root_dir = self.root_dir.clone();
-        let abs = root_dir.join(rel);
         if let Err(e) = remove_file_or_dir(&abs) {
             self.status = Some(format!("Failed to delete {abs:?}: {e}"));
             return;
         }
+
+        // Remember where the selected entry sits so that, after the deletion, the selection can be
+        // moved to the entry that shifts up into its place.
+        let old_ix = self.file_view.cur_entry(&snapshot).map(|(i, _)| i);
+
         let stat_nlink = |p: &Path| {
-            std::fs::symlink_metadata(root_dir.join(p))
+            std::fs::symlink_metadata(self.root_dir.join(p))
                 .ok()
                 .map(|m| m.nlink())
         };
-        let mut tree = self.file_tree.lock().unwrap();
-        if tree.delete_path(rel, &stat_nlink).is_none() {
-            drop(tree);
-            self.status = Some(format!(
-                "Failed to delete {abs:?}: entry not found in file tree."
-            ));
-            return;
-        }
-        drop(tree);
 
-        // Make sure that the selection index of the entry list is still in bounds.
-        // This might not be the case if the last entry was deleted.
-        let len = self.cur_subdir_entry_len();
-        let ix = self.file_view.cur_entry_ix_mut();
-        if *ix >= len {
-            *ix = len.saturating_sub(1);
+        {
+            let mut tree = self.file_tree.lock().unwrap();
+            if tree.delete_path(rel, &stat_nlink).is_none() {
+                drop(tree);
+                self.status = Some(format!(
+                    "Failed to delete {abs:?}: entry not found in file tree."
+                ));
+                return;
+            }
+            self.tree_version.fetch_add(1, Ordering::Relaxed);
         }
+
+        // The deletion modified the file tree: rebuild the snapshot synchronously so that the next
+        // frame reflects it and the selection can be resolved against the fresh list.
+        sync_rebuild(self, snapshot);
+
+        let new_ix = old_ix
+            .map(|old| old.min(snapshot.entries.len().saturating_sub(1)))
+            .unwrap_or(0);
+        self.file_view.selected = snapshot
+            .entries
+            .get(new_ix)
+            .map(|e| e.name.as_ref().clone());
     }
 }
 

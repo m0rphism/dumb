@@ -2,6 +2,10 @@ use std::{
     ffi::OsString,
     io::{Stdout, Write},
     path::{Path, PathBuf},
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 use anyhow::Result;
@@ -9,7 +13,7 @@ use chrono::{DateTime, Local};
 use crossterm::style::Color;
 
 use crate::{
-    DisplayMode, ErrorView, FileView, HelpView, SortBy, State,
+    DisplayMode, ErrorView, HelpView, SortBy, State,
     config::{HeaderLayout, SizeMetric},
     file_tree::{FileNode, FileState, FileTree},
     frame::{Frame, LineWriter},
@@ -31,7 +35,7 @@ pub fn rgb(r: f32, g: f32, b: f32) -> Color {
 #[derive(Debug, Clone)]
 pub struct FileEntry {
     /// The file name of the entry.
-    pub name: Box<OsString>,
+    pub name: Arc<OsString>,
     /// The state of the entry's node in the file tree (relevant for the progress column).
     pub node_state: FileState,
     /// The number of errors in the entry's subtree (relevant for the error row highlighting).
@@ -44,13 +48,41 @@ pub struct FileEntry {
     pub size: u64,
 }
 
-pub fn sorted_entries(file_tree: &FileTree, fv: &FileView) -> Vec<FileEntry> {
-    let children = &file_tree.get(&fv.cur_subdir).unwrap().children;
-    let mut children = children
+/// The view parameters that determine how the entries of a directory are
+/// snapshotted and sorted. These are part of [`ViewSnapshot`] and are compared
+/// against the current view to detect a stale snapshot.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ViewParams {
+    /// The viewed subdirectory, relative to the root directory.
+    pub subdir: PathBuf,
+    /// How the entries are sorted.
+    pub sort_by: SortBy,
+    /// Whether to sort directories before files (only relevant for [`SortBy::Name`]).
+    pub sort_dirs_before_files: bool,
+    /// The size metric used to display and sort the entries.
+    pub size_metric: SizeMetric,
+}
+
+/// Captures a consistent [`ViewSnapshot`] of the file tree for `params`.
+///
+/// Returns `None` if the subdirectory in `params` does not exist. The returned entries are
+/// unsorted; run [`sort_entries`] on them before publishing the snapshot.
+pub fn capture_snapshot(
+    file_tree: &FileTree,
+    file_tree_version: &AtomicU64,
+    params: &ViewParams,
+) -> Option<ViewSnapshot> {
+    let size_of = |n: &FileNode| match params.size_metric {
+        SizeMetric::Freed => n.freed_size,
+        SizeMetric::Naive => n.naive_size,
+    };
+    let cur_node = file_tree.get(&params.subdir)?;
+    let entries = cur_node
+        .children
         .iter()
         .map(|(name, node)| {
-            let inode = *file_tree.inodes.get(&node.inode_id).unwrap();
-            let size = match fv.size_metric {
+            let inode = node.inode;
+            let size = match params.size_metric {
                 SizeMetric::Naive => {
                     if inode.is_dir {
                         node.naive_size
@@ -69,7 +101,7 @@ pub fn sorted_entries(file_tree: &FileTree, fv: &FileView) -> Vec<FileEntry> {
                 }
             };
             FileEntry {
-                name: name.clone().into(),
+                name: name.clone(),
                 node_state: node.state.clone(),
                 num_child_errors: node.num_child_errors,
                 inode,
@@ -77,81 +109,100 @@ pub fn sorted_entries(file_tree: &FileTree, fv: &FileView) -> Vec<FileEntry> {
                 size,
             }
         })
-        .collect::<Vec<_>>();
-    match fv.sort_by {
+        .collect();
+    let header = RenderInfo {
+        cur_dir_size: size_of(cur_node),
+        root_dir_size: size_of(&file_tree.root),
+        root_dir_state: file_tree.root.state.clone(),
+        num_errors: file_tree.errors.len(),
+    };
+    Some(ViewSnapshot {
+        built: true,
+        version: file_tree_version.load(Ordering::Relaxed),
+        params: params.clone(),
+        entries,
+        header,
+    })
+}
+
+/// Sorts an owned snapshot of entries according to `params`.
+pub fn sort_entries(entries: &mut [FileEntry], params: &ViewParams) {
+    match params.sort_by {
         SortBy::Name => {
-            children.sort_by(|e1, e2| {
-                let is_file1 = !e1.is_dir && fv.sort_dirs_before_files;
-                let is_file2 = !e2.is_dir && fv.sort_dirs_before_files;
-                is_file1.cmp(&is_file2).then_with(|| e1.name.cmp(&e2.name))
+            entries.sort_by(|e1, e2| {
+                let is_file1 = !e1.is_dir && params.sort_dirs_before_files;
+                let is_file2 = !e2.is_dir && params.sort_dirs_before_files;
+                is_file1
+                    .cmp(&is_file2)
+                    .then_with(|| e1.name.as_ref().cmp(e2.name.as_ref()))
             });
         }
         SortBy::Size => {
-            children
-                .sort_by(|e1, e2| (e2.size, e1.name.as_ref()).cmp(&(e1.size, e2.name.as_ref())));
+            entries.sort_by(|e1, e2| (e2.size, e1.name.as_ref()).cmp(&(e1.size, e2.name.as_ref())));
         }
         SortBy::ModTime => {
-            children.sort_by(|e1, e2| {
+            entries.sort_by(|e1, e2| {
                 (e2.inode.last_modified, e1.name.as_ref())
                     .cmp(&(e1.inode.last_modified, e2.name.as_ref()))
             });
         }
     }
-    children
 }
 
+/// A consistent, versioned snapshot of the file tree for the currently viewed
+/// subdirectory.
+///
+/// This is the single source of truth for both file tree rendering and user actions: the
+/// header info, the sorted entry list, and the error count all come from the
+/// same tree version, so a rendered frame is internally consistent and every
+/// action refers to the same data that is on screen.
 #[derive(Debug)]
-pub struct SortedCache {
-    version: u64,
-    cur_subdir: PathBuf,
-    sort_by: SortBy,
-    sort_dirs_before_files: bool,
-    size_metric: SizeMetric,
-    entries: Vec<FileEntry>,
+pub struct ViewSnapshot {
+    /// Whether the snapshot has been populated at least once.
+    pub built: bool,
+    /// The file tree version the snapshot was captured at.
+    pub version: u64,
+    /// The view parameters the snapshot was built for.
+    pub params: ViewParams,
+    /// The sorted entries of the subdirectory sepcified in [`ViewSnapshot::params`].
+    pub entries: Vec<FileEntry>,
+    /// The cached header info for rendering.
+    pub header: RenderInfo,
 }
 
-impl Default for SortedCache {
+impl Default for ViewSnapshot {
     fn default() -> Self {
         Self {
+            built: false,
             version: 0,
-            cur_subdir: PathBuf::new(),
-            sort_by: SortBy::Size,
-            sort_dirs_before_files: false,
-            size_metric: SizeMetric::Freed,
+            params: ViewParams {
+                subdir: PathBuf::new(),
+                sort_by: SortBy::Size,
+                sort_dirs_before_files: false,
+                size_metric: SizeMetric::Freed,
+            },
             entries: vec![],
+            header: RenderInfo {
+                cur_dir_size: 0,
+                root_dir_size: 0,
+                root_dir_state: FileState::Queued,
+                num_errors: 0,
+            },
         }
     }
 }
 
-impl SortedCache {
-    /// The sorted entries of the currently viewed subdirectory.
-    pub fn entries<'a, 'b>(
-        &'b mut self,
-        file_tree: &'a FileTree,
-        fv: &'a FileView,
-    ) -> &'b [FileEntry] {
-        let stale = self.version != file_tree.version
-            || self.cur_subdir != fv.cur_subdir
-            || self.sort_by != fv.sort_by
-            || self.sort_dirs_before_files != fv.sort_dirs_before_files
-            || self.size_metric != fv.size_metric;
-        if !stale {
-            return &self.entries;
-        }
-        self.version = file_tree.version;
-        self.cur_subdir = fv.cur_subdir.clone();
-        self.sort_by = fv.sort_by;
-        self.sort_dirs_before_files = fv.sort_dirs_before_files;
-        self.size_metric = fv.size_metric;
-        self.entries = sorted_entries(file_tree, fv);
-        &self.entries
+impl ViewSnapshot {
+    /// Whether the scan of the root directory has completed when the snapshot was taken.
+    pub fn is_scan_done(&self) -> bool {
+        !matches!(self.header.root_dir_state, FileState::Queued)
     }
 }
 
 pub fn render_state(
     stdout: &mut Stdout,
     state: &State,
-    sorted_cache: &mut SortedCache,
+    snapshot: &ViewSnapshot,
     theme: &Theme,
 ) -> Result<Layout> {
     // We buffer all rendering before sending it to stdout to remove terminal flickering.
@@ -161,37 +212,11 @@ pub fn render_state(
 
     frame.clear();
 
-    // The file tree is locked for the whole frame so that the header and the file list are
-    // rendered from the same snapshot.
-    let file_tree = state.file_tree.lock().unwrap();
-
-    let size_of = |n: &FileNode| match state.file_view.size_metric {
-        SizeMetric::Freed => n.freed_size,
-        SizeMetric::Naive => n.naive_size,
-    };
-    let render_info = RenderInfo {
-        cur_dir_size: file_tree
-            .get(&state.file_view.cur_subdir)
-            .map(size_of)
-            .unwrap_or(0),
-        root_dir_size: size_of(&file_tree.root),
-        root_dir_state: file_tree.root.state.clone(),
-        num_errors: file_tree.errors.len(),
-    };
-
-    let header_height = render_header(&mut frame, state, theme, &render_info);
+    let header_height = render_header(&mut frame, state, snapshot, theme);
     let layout = Layout::new(state.term_size, header_height);
     match &state.display_mode {
         DisplayMode::FileTree => {
-            render_file_tree(
-                &mut frame,
-                &file_tree,
-                state,
-                sorted_cache,
-                theme,
-                &render_info,
-                &layout,
-            );
+            render_file_tree(&mut frame, state, snapshot, theme, &layout);
         }
         DisplayMode::ErrorView(error_view) => {
             render_errors(&mut frame, state, theme, error_view, &layout);
@@ -218,6 +243,7 @@ pub fn render_state(
     Ok(layout)
 }
 
+#[derive(Debug)]
 pub struct RenderInfo {
     pub cur_dir_size: u64,
     pub root_dir_size: u64,
@@ -305,8 +331,9 @@ pub fn fixed_columns_width(is_scan_done: bool, show_size_cur: bool) -> i64 {
     columns_width(&table_columns(is_scan_done, show_size_cur), 0) as i64
 }
 
-fn render_header(frame: &mut Frame, state: &State, theme: &Theme, ri: &RenderInfo) -> u16 {
+fn render_header(frame: &mut Frame, state: &State, snapshot: &ViewSnapshot, theme: &Theme) -> u16 {
     let style = &theme.header;
+    let ri = &snapshot.header;
     let mut line = frame.line(0);
 
     // Current Directory
@@ -350,7 +377,7 @@ fn render_header(frame: &mut Frame, state: &State, theme: &Theme, ri: &RenderInf
         line.text(&style.label, ")");
     }
     line.text(&style.label, " [");
-    line.text(&style.size_metric, state.file_view.size_metric.as_str());
+    line.text(&style.size_metric, snapshot.params.size_metric.as_str());
     line.text(&style.label, "]");
     next_field(&mut line, &style.label, state.header_layout);
 
@@ -359,7 +386,7 @@ fn render_header(frame: &mut Frame, state: &State, theme: &Theme, ri: &RenderInf
         HeaderLayout::SingleLine => line.text(&style.label, "Sort by "),
         HeaderLayout::MultiLine => line.text(&style.label, "Sort by:  "),
     }
-    line.text(&style.sort_mode, &format!("{:?}", state.file_view.sort_by));
+    line.text(&style.sort_mode, &format!("{:?}", snapshot.params.sort_by));
 
     // Errors
     if ri.num_errors > 0 {
@@ -398,13 +425,12 @@ fn next_field(line: &mut LineWriter, label: &Style, layout: HeaderLayout) {
 
 fn render_file_tree(
     frame: &mut Frame,
-    file_tree: &FileTree,
     state: &State,
-    sorted_cache: &mut SortedCache,
+    snapshot: &ViewSnapshot,
     theme: &Theme,
-    ri: &RenderInfo,
     layout: &Layout,
 ) {
+    let ri = &snapshot.header;
     let is_scan_done = match ri.root_dir_state {
         FileState::Queued => false,
         FileState::Finished | FileState::Failed(_) => true,
@@ -450,18 +476,19 @@ fn render_file_tree(
     }
 
     // Rows
-    let children = sorted_cache.entries(file_tree, &state.file_view);
-    let skip = i64::max(
-        0,
-        state.file_view.cur_entry_ix() as i64 - (layout.num_content_lines() as i64 / 2),
-    ) as usize;
+    let sel_ix = state
+        .file_view
+        .cur_entry(snapshot)
+        .map(|(i, _)| i)
+        .unwrap_or(0);
+    let skip = i64::max(0, sel_ix as i64 - (layout.num_content_lines() as i64 / 2)) as usize;
     let row_width = columns_width(&cols, name_col_width);
-    for (j, (i, e)) in children.iter().enumerate().skip(skip).enumerate() {
+    for (j, (i, e)) in snapshot.entries.iter().enumerate().skip(skip).enumerate() {
         let y_cur = layout.content_top_line() + 1 + j as u16;
         if y_cur > layout.content_bottom_line() {
             break;
         }
-        let is_selected = i == state.file_view.cur_entry_ix();
+        let is_selected = i == sel_ix;
         let has_error = e.num_child_errors > 0 || matches!(e.node_state, FileState::Failed(_));
         let highlighted = is_selected || has_error;
 

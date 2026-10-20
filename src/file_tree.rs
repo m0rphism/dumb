@@ -1,7 +1,10 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     ffi::OsString,
+    os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
+    sync::Arc,
+    time::SystemTime,
 };
 
 use anyhow::{Context, Result};
@@ -24,8 +27,9 @@ use crate::scan::{Inode, InodeId, ScanEvent};
 pub struct FileTree {
     /// The root node of the directory tree
     pub root: FileNode,
-    /// Information about the inodes behind the directory tree
-    pub inodes: HashMap<InodeId, Inode>,
+    /// The inode ids of directories that have already been added to the tree. A directory
+    /// reached a second time (e.g. via a bind mount) must not count its own size again.
+    pub seen_dirs: HashSet<InodeId>,
     /// Errors collected during scanning, e.g. when a directory could not be read due to missing
     /// permissions.
     pub errors: Vec<(PathBuf, String)>,
@@ -33,9 +37,6 @@ pub struct FileTree {
     /// This ensures correct behavior if the user deletes an entry in the TUI while it is being
     /// scanned.
     pub deleted_paths: Vec<PathBuf>,
-    /// Monotonically increasing version counter, bumped by every modification of the tree, such
-    /// that cached views of the tree can detect staleness (see `crate::render::SortedCache`).
-    pub version: u64,
     /// Maps inodes with multiple paths (hardlinks) to their paths and place of contribution. Kept
     /// for the whole session so that on deletions of one path the size contributions of the other
     /// paths can be adjusted without having to retraverse the entire root directory.
@@ -54,8 +55,10 @@ pub struct LinkRecord {
 
 #[derive(Debug, Clone)]
 pub struct FileNode {
-    pub children: HashMap<OsString, FileNode>,
+    /// The file names of the children of this entry (only for directories)
+    pub children: HashMap<Arc<OsString>, FileNode>,
     pub inode_id: InodeId,
+    pub inode: Inode,
     pub state: FileState,
     pub num_child_errors: usize,
     /// Naive size (see [`FileTree`]).
@@ -72,11 +75,12 @@ pub enum FileState {
 }
 
 impl FileNode {
-    pub fn new(inode_id: InodeId) -> Self {
+    pub fn new(inode_id: InodeId, inode: Inode) -> Self {
         Self {
             children: HashMap::new(),
             state: FileState::Queued,
             inode_id,
+            inode,
             num_child_errors: 0,
             naive_size: 0,
             freed_size: 0,
@@ -104,7 +108,7 @@ impl FileNode {
     /// Create the node at `path` (relative to the root).
     /// All intermediate nodes must already exist, which holds because the scan is pre-order and
     /// deleted paths produce no events.
-    pub fn set_queued(&mut self, path: &Path, inode_id: InodeId) {
+    pub fn set_queued(&mut self, path: &Path, inode_id: InodeId, inode: Inode) {
         let mut node = self;
         let cs = path.components().collect::<Vec<_>>();
         if !cs.is_empty() {
@@ -113,9 +117,11 @@ impl FileNode {
                 node = node.children.get_mut(c).unwrap()
             }
             let c = cs.last().unwrap().as_os_str().to_os_string();
-            node.children.insert(c, FileNode::new(inode_id));
+            node.children
+                .insert(c.into(), FileNode::new(inode_id, inode));
         } else {
             node.inode_id = inode_id;
+            node.inode = inode;
         }
     }
 
@@ -172,12 +178,17 @@ impl FileTree {
         let meta = path
             .metadata()
             .with_context(|| format!("Failed to read metadata for path {path:?}."))?;
+        let inode = Inode {
+            allocated_bytes: meta.blocks() * 512,
+            last_modified: meta.modified().unwrap_or(SystemTime::UNIX_EPOCH),
+            num_hardlinks: meta.nlink(),
+            is_dir: meta.is_dir(),
+        };
         Ok(Self {
-            inodes: HashMap::new(),
-            root: FileNode::new(InodeId::new(&meta)),
+            seen_dirs: HashSet::new(),
+            root: FileNode::new(InodeId::new(&meta), inode),
             errors: vec![],
             deleted_paths: vec![],
-            version: 0,
             linked: HashMap::new(),
         })
     }
@@ -197,7 +208,7 @@ impl FileTree {
             .any(|d| path == d.as_path() || path.starts_with(d.as_path()))
     }
 
-    /// Single entry point for scan events.
+    /// Single entry point for scan events. The caller bumps the tree version after each event.
     ///
     /// - Events with paths under a deleted path are dropped.
     /// - `StartedScan` of a directory adds the disk usage of its own filesystem entry to both sizes
@@ -213,14 +224,12 @@ impl FileTree {
                 if self.is_deleted_path(&path) {
                     return;
                 }
-                self.root.set_queued(&path, inode_id);
-                let fresh = !self.inodes.contains_key(&inode_id);
-                self.inodes.entry(inode_id).or_insert(inode);
+                self.root.set_queued(&path, inode_id, inode);
                 if inode.is_dir {
                     // The size of a directory entry itself is counted once per inode: a directory
                     // reached a second time (e.g. via a bind mount) is owned by the first path and
                     // contributes nothing.
-                    if fresh {
+                    if self.seen_dirs.insert(inode_id) {
                         self.root
                             .add_along(&path, inode.allocated_bytes, inode.allocated_bytes);
                     }
@@ -265,7 +274,6 @@ impl FileTree {
                 self.errors.push((path, err));
             }
         }
-        self.version += 1;
     }
 
     /// Delete the subtree at `path` (relative to the root directory) from the tree and update all
@@ -274,7 +282,7 @@ impl FileTree {
     ///
     /// `stat_nlink` is queried with a root-dir-relative path to refresh the link count of a surviving
     /// path of an incomplete multi-path inode. It should return `None` if the path cannot be
-    /// resolved.
+    /// resolved. The caller bumps the tree version if the deletion succeeded.
     ///
     /// Returns `None` if `path` is the root or does not exist in the tree.
     pub fn delete_path(
@@ -287,8 +295,8 @@ impl FileTree {
         }
         let node = self.root.get(path)?;
         let inode_id = node.inode_id;
+        let inode = node.inode;
         let (naive_size, freed_size) = (node.naive_size, node.freed_size);
-        let inode = *self.inodes.get(&inode_id)?;
         let parent = path.parent().map(PathBuf::from).unwrap_or_default();
 
         // Reverse the effects that previous `set_error` calls on in the deleted sub tree had on its
@@ -305,6 +313,27 @@ impl FileTree {
         }
         self.errors
             .retain(|(p, _)| p != path && !p.starts_with(path));
+
+        // Collect multi-path inodes that have at least one path with a deleted prefix, together
+        // with the size of the inode.
+        let affected: Vec<(InodeId, u64)> = self
+            .linked
+            .iter()
+            .filter_map(|(inode_id, link_record)| {
+                let inode_has_path_with_deleted_prefix = link_record
+                    .paths
+                    .iter()
+                    .any(|n| n == path || n.starts_with(path));
+                inode_has_path_with_deleted_prefix.then_some((
+                    *inode_id,
+                    link_record
+                        .paths
+                        .first()
+                        .and_then(|p| self.root.get(p).map(|n| n.inode.allocated_bytes))
+                        .unwrap_or(0),
+                ))
+            })
+            .collect();
 
         self.remove_subtree(path)?;
 
@@ -323,25 +352,8 @@ impl FileTree {
                 .sub_along(&parent, inode.allocated_bytes, freed_delta);
         }
 
-        // Collect multi-path inodes that have at least one path with a deleted prefix.
-        let affected: Vec<InodeId> = self
-            .linked
-            .iter()
-            .filter_map(|(inode_id, link_record)| {
-                let inode_has_path_with_deleted_prefix = link_record
-                    .paths
-                    .iter()
-                    .any(|n| n == path || n.starts_with(path));
-                inode_has_path_with_deleted_prefix.then_some(*inode_id)
-            })
-            .collect();
         // Update the size contribution of the affected inodes.
-        for inode_id in affected {
-            let size = self
-                .inodes
-                .get(&inode_id)
-                .map(|i| i.allocated_bytes)
-                .unwrap_or(0);
+        for (inode_id, size) in affected {
             let Some(link_record) = self.linked.get_mut(&inode_id) else {
                 continue;
             };
@@ -381,7 +393,6 @@ impl FileTree {
         }
 
         self.deleted_paths.push(path.to_path_buf());
-        self.version += 1;
 
         Some(())
     }
