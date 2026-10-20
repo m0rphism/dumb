@@ -191,7 +191,7 @@ fn run() -> Result<()> {
     let mut snapshot = Snapshot::default();
     snapshot.sync_rebuild(&state.file_view.params(), &state.file_tree, &tree_version);
     state.file_view.resolve_current_selection(&snapshot);
-    state.layout = render_state(&mut stdout, &state, &snapshot, &theme)?;
+    state.layout = render_state(&mut stdout, &state, &snapshot, &theme, &config)?;
 
     for event in receiver {
         let redraw = match event {
@@ -239,7 +239,7 @@ fn run() -> Result<()> {
             }
         };
         if redraw {
-            state.layout = render_state(&mut stdout, &state, &snapshot, &theme)?;
+            state.layout = render_state(&mut stdout, &state, &snapshot, &theme, &config)?;
         }
     }
 

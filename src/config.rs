@@ -27,6 +27,9 @@ pub struct Config {
     #[serde_inline_default(0)]
     pub default_name_column_width: u64,
 
+    #[serde_inline_default(true)]
+    pub display_home_as_tilde: bool,
+
     #[serde_inline_default(0)]
     pub max_name_column_width: u64,
 

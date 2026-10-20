@@ -9,7 +9,7 @@ use crossterm::style::Color;
 
 use crate::{
     DisplayMode, ErrorView, HelpView, State,
-    config::HeaderLayout,
+    config::{Config, HeaderLayout},
     file_tree::FileState,
     frame::{Frame, LineWriter},
     help::HELP,
@@ -23,6 +23,7 @@ pub fn render_state(
     state: &State,
     snapshot: &Snapshot,
     theme: &Theme,
+    config: &Config,
 ) -> Result<Layout> {
     // We buffer all rendering before sending it to stdout to remove terminal flickering.
     // Flickering shouldn't be an issue if stdout is only flushed at the end, but for some reason
@@ -31,7 +32,7 @@ pub fn render_state(
 
     frame.clear();
 
-    let header_height = render_header(&mut frame, state, snapshot, theme);
+    let header_height = render_header(&mut frame, state, snapshot, theme, config);
     let layout = Layout::new(state.term_size, header_height);
     match &state.display_mode {
         DisplayMode::FileTree => {
@@ -142,13 +143,19 @@ pub fn fixed_columns_width(is_scan_done: bool, show_size_cur: bool) -> i64 {
     columns_width(&table_columns(is_scan_done, show_size_cur), 0) as i64
 }
 
-fn render_header(frame: &mut Frame, state: &State, snapshot: &Snapshot, theme: &Theme) -> u16 {
+fn render_header(
+    frame: &mut Frame,
+    state: &State,
+    snapshot: &Snapshot,
+    theme: &Theme,
+    config: &Config,
+) -> u16 {
     let style = &theme.header;
     let ri = &snapshot.header;
     let mut line = frame.line(0);
 
     // Current Directory
-    let prefix_str = state.root_dir.to_string_lossy();
+    let prefix_str = display_path_prefix(&state.root_dir, config.display_home_as_tilde);
     let suffix_str = state.file_view.cur_subdir.to_string_lossy();
 
     if state.header_layout == HeaderLayout::MultiLine {
@@ -225,6 +232,22 @@ fn render_header(frame: &mut Frame, state: &State, snapshot: &Snapshot, theme: &
     }
 
     line.y() + 1
+}
+
+/// Replace `$HOME` with `~` if the corresponding option is set.
+fn display_path_prefix(path: &Path, display_home_as_tilde: bool) -> String {
+    if display_home_as_tilde
+        && let Some(home) = dirs::home_dir()
+        && let Ok(rest) = path.strip_prefix(&home)
+    {
+        if rest.as_os_str().is_empty() {
+            "~".to_string()
+        } else {
+            format!("~/{}", rest.to_string_lossy())
+        }
+    } else {
+        path.to_string_lossy().into_owned()
+    }
 }
 
 fn next_field(line: &mut LineWriter, label: &Style, layout: HeaderLayout) {

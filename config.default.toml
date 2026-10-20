@@ -34,6 +34,9 @@ default_show_size_cur_column = true
 # also switch between auto width and a fixed width.
 default_name_column_width = 0
 
+# Whether the header should replace `$HOME` with `~` in the directory prefix.
+display_home_as_tilde = true
+
 # Maximum width chosen by the auto Name column width (i.e. if
 # default_name_column_width is 0). 0 means no maximum. The user can still
 # increase the column beyond this maximum with `+`.
