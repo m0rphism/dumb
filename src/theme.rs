@@ -70,19 +70,19 @@ pub struct Header {
 #[serde_inline_default]
 #[derive(Clone, Debug, Deserialize)]
 pub struct FileTable {
-    #[serde_inline_default(Style::default().bold())]
+    #[serde_inline_default(Style::default().bold(true))]
     pub name_header: Style,
 
-    #[serde_inline_default(Style::default().bold())]
+    #[serde_inline_default(Style::default().bold(true))]
     pub size_abs_header: Style,
 
-    #[serde_inline_default(Style::default().bold())]
+    #[serde_inline_default(Style::default().bold(true))]
     pub size_rel_header: Style,
 
-    #[serde_inline_default(Style::default().bold())]
+    #[serde_inline_default(Style::default().bold(true))]
     pub size_cur_header: Style,
 
-    #[serde_inline_default(Style::default().bold())]
+    #[serde_inline_default(Style::default().bold(true))]
     pub modtime_header: Style,
 
     /// Style for names of entries that are currently being scanned. Merged
@@ -131,7 +131,7 @@ pub struct FileTable {
 pub struct ErrorView {
     #[serde_inline_default(Style::default())]
     pub index: Style,
-    #[serde_inline_default(Style::default().fg([1.0, 0.5, 0.5]).bold())]
+    #[serde_inline_default(Style::default().fg([1.0, 0.5, 0.5]).bold(true))]
     pub path: Style,
     #[serde_inline_default(Style::default().fg([0.8, 0.3, 0.3]))]
     pub message: Style,
@@ -140,11 +140,11 @@ pub struct ErrorView {
 #[serde_inline_default]
 #[derive(Clone, Debug, Deserialize)]
 pub struct HelpView {
-    #[serde_inline_default(Style::default().fg([0.8, 0.5, 0.8]).bold())]
+    #[serde_inline_default(Style::default().fg([0.8, 0.5, 0.8]).bold(true))]
     pub keys_header: Style,
-    #[serde_inline_default(Style::default().fg([0.8, 0.8, 0.5]).bold())]
+    #[serde_inline_default(Style::default().fg([0.8, 0.8, 0.5]).bold(true))]
     pub action_header: Style,
-    #[serde_inline_default(Style::default().fg([0.5, 0.8, 0.8]).bold())]
+    #[serde_inline_default(Style::default().fg([0.5, 0.8, 0.8]).bold(true))]
     pub scope_header: Style,
 
     #[serde_inline_default(Style::default().fg([0.8, 0.5, 0.8]))]
@@ -209,17 +209,17 @@ pub struct Style {
     #[serde_inline_default(None)]
     pub bg: Option<Color>,
 
-    #[serde_inline_default(false)]
-    pub bold: bool,
+    #[serde_inline_default(None)]
+    pub bold: Option<bool>,
 
-    #[serde_inline_default(false)]
-    pub italic: bool,
+    #[serde_inline_default(None)]
+    pub italic: Option<bool>,
 
-    #[serde_inline_default(false)]
-    pub underlined: bool,
+    #[serde_inline_default(None)]
+    pub underlined: Option<bool>,
 
-    #[serde_inline_default(false)]
-    pub reversed: bool,
+    #[serde_inline_default(None)]
+    pub reversed: Option<bool>,
 }
 
 impl Style {
@@ -231,30 +231,30 @@ impl Style {
         self.bg = Some(v);
         self
     }
-    pub fn bold(mut self) -> Self {
-        self.bold = true;
+    pub fn bold(mut self, on: bool) -> Self {
+        self.bold = Some(on);
         self
     }
-    pub fn italic(mut self) -> Self {
-        self.italic = true;
+    pub fn italic(mut self, on: bool) -> Self {
+        self.italic = Some(on);
         self
     }
-    pub fn underlined(mut self) -> Self {
-        self.underlined = true;
+    pub fn underlined(mut self, on: bool) -> Self {
+        self.underlined = Some(on);
         self
     }
-    pub fn reversed(mut self) -> Self {
-        self.reversed = true;
+    pub fn reversed(mut self, on: bool) -> Self {
+        self.reversed = Some(on);
         self
     }
     pub fn merge(&self, other: &Self) -> Self {
         Self {
             fg: other.fg.or(self.fg),
             bg: other.bg.or(self.bg),
-            bold: other.bold,
-            italic: other.italic,
-            underlined: other.underlined,
-            reversed: other.reversed,
+            bold: other.bold.or(self.bold),
+            italic: other.italic.or(self.italic),
+            underlined: other.underlined.or(self.underlined),
+            reversed: other.reversed.or(self.reversed),
         }
     }
     pub fn write(&self, w: &mut impl Write) -> Result<(), std::io::Error> {
@@ -264,16 +264,16 @@ impl Style {
         if let Some(bg) = self.bg {
             write!(w, "{}", SetBackgroundColor(color_to_crossterm(&bg)))?;
         }
-        if self.bold {
+        if self.bold == Some(true) {
             write!(w, "{}", SetAttribute(Bold))?;
         }
-        if self.italic {
+        if self.italic == Some(true) {
             write!(w, "{}", SetAttribute(Italic))?;
         }
-        if self.underlined {
+        if self.underlined == Some(true) {
             write!(w, "{}", SetAttribute(Underlined))?;
         }
-        if self.reversed {
+        if self.reversed == Some(true) {
             write!(w, "{}", SetAttribute(Reverse))?;
         }
         Ok(())
