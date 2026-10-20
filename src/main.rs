@@ -349,7 +349,7 @@ fn handle_key_event(
                     let _ = build_sender.send(state.file_view.params());
                     true
                 }
-                KeyCode::Char('c') => {
+                KeyCode::Char('C') => {
                     state.file_view.show_size_cur_column = !state.file_view.show_size_cur_column;
                     true
                 }

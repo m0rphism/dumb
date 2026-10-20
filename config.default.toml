@@ -22,7 +22,7 @@ default_size_metric = "freed"
 
 # Whether to show the `Size Cur` column (the size relative to the current
 # directory) by default. The column is only relevant in subdirectories.
-# Can be toggled at runtime by pressing `c`.
+# Can be toggled at runtime by pressing `C`.
 default_show_size_cur_column = true
 
 # Whether to show the `Last Modified` column by default.
