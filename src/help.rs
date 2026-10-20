@@ -1,6 +1,7 @@
 pub const HELP: &[(&str, &str, &str)] = &[
     ("Keys", "Action", "Scope"),
     ("q", "Quit", "files"),
+    ("C-c", "Quit", "files, errors, help"),
     ("q", "Back to previous view", "errors, help"),
     ("hjkl/arrow keys", "Basic motions", "files, errors, help"),
     ("g/Home", "Jump to first entry", "files, errors, help"),

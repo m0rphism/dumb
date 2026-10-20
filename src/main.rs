@@ -261,6 +261,12 @@ fn handle_key_event(
         // Any key press clears the status message.
         state.status = None;
 
+        if key_event.code == KeyCode::Char('c')
+            && key_event.modifiers == KeyModifiers::CONTROL
+        {
+            return None;
+        }
+
         let layout = state.layout;
         match &mut state.display_mode {
             DisplayMode::FileTree => match key_event.code {
