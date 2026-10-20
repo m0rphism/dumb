@@ -60,7 +60,6 @@ size_max_color = [1.0, 0.3, 0.3]
 [file_table]
 
   # Styles for the header cells of the file table
-  progress_header = { bold = true }
   name_header     = { bold = true }
   size_abs_header = { bold = true }
   size_rel_header = { bold = true }
@@ -71,13 +70,15 @@ size_max_color = [1.0, 0.3, 0.3]
   # - Cells in the `Name` column can use different styles depending on whether
   #   the name refers to a file (`name_file_value`), a directory
   #   (`name_dir_value`), or a file with multiple links (`name_hardlink_value`).
+  #   Entries that are currently being scanned use `name_scan_value`, which is
+  #   merged over the applicable name style (i.e. takes precedence over it).
   # - Relative sizes (`size_rel_value`, `size_cur_value`) default to using a
   #   color between `size_min_color` and `size_max_color` depending on
   #   percentage.
   # - The modification time has two styles:
   #   - `modtime_value` applies to the numbers in the datetime;
   #   - `modtime_delim` applies to the delimiters, i.e. `-` and `:` characters.
-  progress_value  = {}
+  name_scan_value = { fg = [0.4, 0.5, 1.0] }
   name_file_value = {}
   name_dir_value  = { fg = [0.7, 0.7, 0.7] }
   name_hardlink_value = { fg = [0.9, 0.9, 0.6] }

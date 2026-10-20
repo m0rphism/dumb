@@ -71,9 +71,6 @@ pub struct Header {
 #[derive(Clone, Debug, Deserialize)]
 pub struct FileTable {
     #[serde_inline_default(Style::default().bold())]
-    pub progress_header: Style,
-
-    #[serde_inline_default(Style::default().bold())]
     pub name_header: Style,
 
     #[serde_inline_default(Style::default().bold())]
@@ -88,8 +85,10 @@ pub struct FileTable {
     #[serde_inline_default(Style::default().bold())]
     pub modtime_header: Style,
 
-    #[serde_inline_default(Style::default())]
-    pub progress_value: Style,
+    /// Style for names of entries that are currently being scanned. Merged
+    /// over the applicable name style (i.e. it takes precedence over it).
+    #[serde_inline_default(Style::default().fg(C1))]
+    pub name_scan_value: Style,
 
     #[serde_inline_default(Style::default())]
     pub name_file_value: Style,

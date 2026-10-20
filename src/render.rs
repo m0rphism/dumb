@@ -69,8 +69,6 @@ const COLUMN_GAP: u16 = 2;
 /// A column of the file table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Column {
-    /// Scan progress indicator. Only visible while the scan is running.
-    Progress,
     /// Entry name. The only column whose width is not fixed.
     Name,
     /// Absolute size of the entry.
@@ -86,7 +84,6 @@ pub enum Column {
 impl Column {
     pub fn header(self) -> &'static str {
         match self {
-            Column::Progress => "S",
             Column::Name => "Name",
             Column::SizeAbs => "Size Abs",
             Column::SizeRel => "Size Rel",
@@ -97,7 +94,6 @@ impl Column {
 
     pub fn width(self, name_col_width: u16) -> u16 {
         match self {
-            Column::Progress => 1,
             Column::Name => name_col_width,
             Column::SizeAbs => 10,
             Column::SizeRel => 8,
@@ -108,18 +104,15 @@ impl Column {
 
     pub fn right_aligned(self) -> bool {
         match self {
-            Column::Progress | Column::Name | Column::ModTime => false,
+            Column::Name | Column::ModTime => false,
             Column::SizeAbs | Column::SizeRel | Column::SizeCur => true,
         }
     }
 }
 
 /// The columns of the file table in display order for a given display state.
-pub fn table_columns(is_scan_done: bool, show_size_cur: bool) -> Vec<Column> {
+pub fn table_columns(show_size_cur: bool) -> Vec<Column> {
     let mut cols = Vec::new();
-    if !is_scan_done {
-        cols.push(Column::Progress);
-    }
     cols.push(Column::Name);
     cols.push(Column::SizeAbs);
     cols.push(Column::SizeRel);
@@ -139,8 +132,8 @@ pub fn columns_width(cols: &[Column], name_col_width: u16) -> u16 {
 /// The total width consumed by all columns other than the Name column,
 /// including the gaps between the columns. This determines how much terminal
 /// width is left for the auto-sized Name column.
-pub fn fixed_columns_width(is_scan_done: bool, show_size_cur: bool) -> i64 {
-    columns_width(&table_columns(is_scan_done, show_size_cur), 0) as i64
+pub fn fixed_columns_width(show_size_cur: bool) -> i64 {
+    columns_width(&table_columns(show_size_cur), 0) as i64
 }
 
 fn render_header(
@@ -299,19 +292,15 @@ fn render_file_tree(
     layout: &Layout,
 ) {
     let ri = &snapshot.header;
-    let is_scan_done = match ri.root_dir_state {
-        FileState::Queued => false,
-        FileState::Finished | FileState::Failed(_) => true,
-    };
     let show_size_cur = state.file_view.show_size_cur();
     let name_col_width = if state.file_view.name_col_width > 0 {
         state.file_view.name_col_width
     } else {
         state
             .file_view
-            .auto_name_col_width(state.term_size[0] as i64, is_scan_done)
+            .auto_name_col_width(state.term_size[0] as i64)
     } as u16;
-    let cols = table_columns(is_scan_done, show_size_cur);
+    let cols = table_columns(show_size_cur);
 
     // Header
     let style = &theme.file_table;
@@ -320,7 +309,6 @@ fn render_file_tree(
         let mut x = 0;
         for (i, col) in cols.iter().enumerate() {
             let header_style = match col {
-                Column::Progress => &style.progress_header,
                 Column::Name => &style.name_header,
                 Column::SizeAbs => &style.size_abs_header,
                 Column::SizeRel => &style.size_rel_header,
@@ -383,14 +371,6 @@ fn render_file_tree(
                 line.spaces_until(&bg_style, x);
             }
             match col {
-                Column::Progress => {
-                    let state_str = match e.node_state {
-                        FileState::Queued => "…",
-                        FileState::Finished => " ",
-                        FileState::Failed(_) => "E",
-                    };
-                    line.text(&style_mod(&style.progress_value), state_str);
-                }
                 Column::Name => {
                     let mut name = e
                         .name
@@ -401,14 +381,19 @@ fn render_file_tree(
                     if e.is_dir {
                         name += "/";
                     }
-                    let s = if e.inode.is_dir {
+                    let base = if e.inode.is_dir {
                         &style.name_dir_value
                     } else if e.inode.num_hardlinks > 1 {
                         &style.name_hardlink_value
                     } else {
                         &style.name_file_value
                     };
-                    line.text(&style_mod(s), &name);
+                    let s = if matches!(e.node_state, FileState::Queued) {
+                        base.merge(&style.name_scan_value)
+                    } else {
+                        base.clone()
+                    };
+                    line.text(&style_mod(&s), &name);
                 }
                 Column::SizeAbs => {
                     let size_abs_str = bytes_to_str(e.size);

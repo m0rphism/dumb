@@ -102,11 +102,6 @@ impl Default for Snapshot {
 }
 
 impl Snapshot {
-    /// Whether the scan of the root directory has completed when the snapshot was taken.
-    pub fn is_scan_done(&self) -> bool {
-        !matches!(self.header.root_dir_state, FileState::Queued)
-    }
-
     /// Rebuild the snapshot synchronously for `params`.
     ///
     /// Used on startup, on changes to the current directory, and after a deletion, i.e. exactly when

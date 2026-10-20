@@ -356,12 +356,10 @@ fn handle_key_event(
                 KeyCode::Char('+') => state.file_view.adjust_name_col_width(
                     1,
                     state.term_size[0] as i64,
-                    snapshot.is_scan_done(),
                 ),
                 KeyCode::Char('-') => state.file_view.adjust_name_col_width(
                     -1,
                     state.term_size[0] as i64,
-                    snapshot.is_scan_done(),
                 ),
                 KeyCode::Char('e') => {
                     if let Some((_, entry)) = state.file_view.cur_entry(snapshot) {
@@ -688,8 +686,8 @@ impl FileView {
         self.show_size_cur_column && !self.cur_subdir.to_string_lossy().is_empty()
     }
 
-    pub fn auto_name_col_width(&self, term_width: i64, is_scan_done: bool) -> i64 {
-        let leftover = term_width - fixed_columns_width(is_scan_done, self.show_size_cur());
+    pub fn auto_name_col_width(&self, term_width: i64) -> i64 {
+        let leftover = term_width - fixed_columns_width(self.show_size_cur());
         let w = if self.max_name_column_width > 0 {
             leftover.min(self.max_name_column_width)
         } else {
@@ -702,9 +700,8 @@ impl FileView {
         &mut self,
         delta: i64,
         term_width: i64,
-        is_scan_done: bool,
     ) -> bool {
-        let auto = self.auto_name_col_width(term_width, is_scan_done);
+        let auto = self.auto_name_col_width(term_width);
         let adjusted = if self.name_col_width == 0 {
             // Switch from auto to a fixed width.
             auto + delta
