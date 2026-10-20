@@ -116,7 +116,7 @@ impl Snapshot {
     ) {
         *self = {
             let file_tree = file_tree.lock().unwrap();
-            match Self::capture(&file_tree, file_tree_version, &params) {
+            match Self::capture(&file_tree, file_tree_version, params) {
                 Some(snapshot) => snapshot,
                 // The current directory no longer exists (potentially deleted outside of dumb), so set
                 // an empty snapshot for it.
@@ -137,7 +137,7 @@ impl Snapshot {
                 },
             }
         };
-        self.sort_entries(&params);
+        self.sort_entries(params);
     }
 
     /// Spawn the snapshot builder thread, which takes build requests in form of [`ViewParams`] and calls

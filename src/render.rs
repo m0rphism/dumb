@@ -150,7 +150,7 @@ fn render_header(
     let mut line = frame.line(0);
 
     // Path
-    let prefix_str = display_path_prefix(&state.root_dir, &config);
+    let prefix_str = display_path_prefix(&state.root_dir, config);
     let suffix_str = state.file_view.cur_subdir.to_string_lossy();
     let path_str = if suffix_str.is_empty() {
         format!("{prefix_str}/")

@@ -268,10 +268,10 @@ fn handle_key_event(
                 KeyCode::Char('j') | KeyCode::Down => {
                     state
                         .file_view
-                        .apply_motion(Motion::Down, &snapshot, &layout)
+                        .apply_motion(Motion::Down, snapshot, &layout)
                 }
                 KeyCode::Char('k') | KeyCode::Up => {
-                    state.file_view.apply_motion(Motion::Up, &snapshot, &layout)
+                    state.file_view.apply_motion(Motion::Up, snapshot, &layout)
                 }
                 KeyCode::Char('h') | KeyCode::Left => {
                     if state.file_view.leave_subdir() {
@@ -280,7 +280,7 @@ fn handle_key_event(
                             &state.file_tree,
                             &state.tree_version,
                         );
-                        state.file_view.resolve_current_selection(&snapshot);
+                        state.file_view.resolve_current_selection(snapshot);
                         true
                     } else {
                         false
@@ -297,7 +297,7 @@ fn handle_key_event(
                             &state.file_tree,
                             &state.tree_version,
                         );
-                        state.file_view.resolve_current_selection(&snapshot);
+                        state.file_view.resolve_current_selection(snapshot);
                         true
                     } else {
                         false
@@ -306,33 +306,33 @@ fn handle_key_event(
                 KeyCode::Char('g') | KeyCode::Home => {
                     state
                         .file_view
-                        .apply_motion(Motion::First, &snapshot, &layout)
+                        .apply_motion(Motion::First, snapshot, &layout)
                 }
                 KeyCode::Char('G') | KeyCode::End => {
                     state
                         .file_view
-                        .apply_motion(Motion::Last, &snapshot, &layout)
+                        .apply_motion(Motion::Last, snapshot, &layout)
                 }
                 KeyCode::Char('f') if key_event.modifiers == KeyModifiers::CONTROL => state
                     .file_view
-                    .apply_motion(Motion::PageDown, &snapshot, &layout),
+                    .apply_motion(Motion::PageDown, snapshot, &layout),
                 KeyCode::PageDown => {
                     state
                         .file_view
-                        .apply_motion(Motion::PageDown, &snapshot, &layout)
+                        .apply_motion(Motion::PageDown, snapshot, &layout)
                 }
                 KeyCode::Char('b') if key_event.modifiers == KeyModifiers::CONTROL => state
                     .file_view
-                    .apply_motion(Motion::PageUp, &snapshot, &layout),
+                    .apply_motion(Motion::PageUp, snapshot, &layout),
                 KeyCode::PageUp => state
                     .file_view
-                    .apply_motion(Motion::PageUp, &snapshot, &layout),
+                    .apply_motion(Motion::PageUp, snapshot, &layout),
                 KeyCode::Char('d') if key_event.modifiers == KeyModifiers::CONTROL => state
                     .file_view
-                    .apply_motion(Motion::HalfPageDown, &snapshot, &layout),
+                    .apply_motion(Motion::HalfPageDown, snapshot, &layout),
                 KeyCode::Char('u') if key_event.modifiers == KeyModifiers::CONTROL => state
                     .file_view
-                    .apply_motion(Motion::HalfPageUp, &snapshot, &layout),
+                    .apply_motion(Motion::HalfPageUp, snapshot, &layout),
                 KeyCode::Char('s') => {
                     state.file_view.sort_by = state.file_view.sort_by.next();
                     let _ = build_sender.send(state.file_view.params());
@@ -357,14 +357,12 @@ fn handle_key_event(
                     state.file_view.show_modtime_column = !state.file_view.show_modtime_column;
                     true
                 }
-                KeyCode::Char('+') => state.file_view.adjust_name_col_width(
-                    1,
-                    state.term_size[0] as i64,
-                ),
-                KeyCode::Char('-') => state.file_view.adjust_name_col_width(
-                    -1,
-                    state.term_size[0] as i64,
-                ),
+                KeyCode::Char('+') => state
+                    .file_view
+                    .adjust_name_col_width(1, state.term_size[0] as i64),
+                KeyCode::Char('-') => state
+                    .file_view
+                    .adjust_name_col_width(-1, state.term_size[0] as i64),
                 KeyCode::Char('e') => {
                     if let Some((_, entry)) = state.file_view.cur_entry(snapshot) {
                         let cur_path = state.file_view.cur_subdir.join(&*entry.name);
@@ -694,7 +692,8 @@ impl FileView {
     }
 
     pub fn auto_name_col_width(&self, term_width: i64) -> i64 {
-        let leftover = term_width - fixed_columns_width(self.show_size_cur(), self.show_modtime_column);
+        let leftover =
+            term_width - fixed_columns_width(self.show_size_cur(), self.show_modtime_column);
         let w = if self.max_name_column_width > 0 {
             leftover.min(self.max_name_column_width)
         } else {
@@ -703,11 +702,7 @@ impl FileView {
         w.max(4)
     }
 
-    pub fn adjust_name_col_width(
-        &mut self,
-        delta: i64,
-        term_width: i64,
-    ) -> bool {
+    pub fn adjust_name_col_width(&mut self, delta: i64, term_width: i64) -> bool {
         let auto = self.auto_name_col_width(term_width);
         let adjusted = if self.name_col_width == 0 {
             // Switch from auto to a fixed width.
@@ -824,7 +819,7 @@ impl State {
 
         // Remember where the selected entry sits so that, after the deletion, the selection can be
         // moved to the entry that shifts up into its place.
-        let old_ix = self.file_view.cur_entry(&snapshot).map(|(i, _)| i);
+        let old_ix = self.file_view.cur_entry(snapshot).map(|(i, _)| i);
 
         let stat_nlink = |p: &Path| {
             std::fs::symlink_metadata(self.root_dir.join(p))
