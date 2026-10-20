@@ -658,31 +658,21 @@ pub fn percent_to_color(f: f64, theme: &Theme) -> [f32; 3] {
     interpolate_color(f, theme.size_min_color, theme.size_max_color)
 }
 
-pub fn bytes_to_str(mut n: u64) -> String {
+pub fn bytes_to_str(n: u64) -> String {
+    const UNITS: [&str; 8] = ["B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB"];
     let mut unit = 0;
-    let mut rest = 0;
-    while n > 1024 {
+    let mut size = n as f64;
+    // Powers of 1024 are exact in binary floating point, so e.g. 1048576
+    // divides down to exactly "1.00 MB".
+    while size >= 1024.0 && unit + 1 < UNITS.len() {
+        size /= 1024.0;
         unit += 1;
-        rest = n % 1024;
-        n /= 1024;
     }
 
-    let size = n as f32 + (rest as f32 / 1024.0);
-    let unit = match unit {
-        0 => "B",
-        1 => "KB",
-        2 => "MB",
-        3 => "GB",
-        4 => "TB",
-        5 => "PB",
-        6 => "EB",
-        _ => "?B",
-    };
-
-    if unit == "B" {
-        format!("{} {}", size, unit)
+    if unit == 0 {
+        format!("{n} B")
     } else {
-        format!("{:.2} {}", size, unit)
+        format!("{size:.2} {}", UNITS[unit])
     }
 }
 
