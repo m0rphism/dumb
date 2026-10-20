@@ -340,7 +340,7 @@ fn render_file_tree(
         .cur_entry(snapshot)
         .map(|(i, _)| i)
         .unwrap_or(0);
-    let skip = i64::max(0, sel_ix as i64 - (layout.num_content_lines() as i64 / 2)) as usize;
+    let skip = i64::max(0, sel_ix as i64 - (layout.num_file_list_lines() as i64 / 2)) as usize;
     let row_width = columns_width(&cols, name_col_width);
     for (j, (i, e)) in snapshot.entries.iter().enumerate().skip(skip).enumerate() {
         let y_cur = layout.content_top_line() + 1 + j as u16;
