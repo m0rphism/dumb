@@ -30,6 +30,9 @@ pub struct Config {
     #[serde_inline_default(true)]
     pub display_prefix_path: bool,
 
+    #[serde_inline_default("Press ? to display keybindings".to_string())]
+    pub initial_statusbar_message: String,
+
     #[serde_inline_default(0)]
     pub max_name_column_width: u64,
 

@@ -178,7 +178,11 @@ fn run() -> Result<()> {
         display_mode: DisplayMode::FileTree,
         help_return_mode: DisplayMode::FileTree,
         help_meta: HelpMeta::new(),
-        status: None,
+        status: if config.initial_statusbar_message.is_empty() {
+            None
+        } else {
+            Some(config.initial_statusbar_message.clone())
+        },
     };
 
     let mut stdout = stdout();

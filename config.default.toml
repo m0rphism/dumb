@@ -38,6 +38,11 @@ display_home_as_tilde = true
 # current directory), or a `…` placeholder instead.
 display_prefix_path = true
 
+# The status bar message that is displayed at startup, which is cleared on
+# the next key press. Set to "" to not display a status bar message at
+# startup.
+initial_statusbar_message = "Press ? to display keybindings"
+
 # Maximum width chosen by the auto Name column width (i.e. if
 # default_name_column_width is 0). 0 means no maximum. The user can still
 # increase the column beyond this maximum with `+`.
