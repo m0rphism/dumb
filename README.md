@@ -32,6 +32,10 @@ Useful for exploring what eats up all that disk space and deleting files in one 
   In corner cases or exotic environments (e.g. network mounts) the size may be
   slightly off, see [Limitations](#limitations) for details.
 
+- **Responsiveness.**
+  The TUI remains snappy independent of directory size. Tested on my
+  `/nix/store` with ~270k directory entries.
+
 - **Keybindings.**
   Both `vim` keybindings and regular keybindings are supported.
   Press `?` inside the program to display a list of all keybindings.
@@ -49,16 +53,16 @@ Useful for exploring what eats up all that disk space and deleting files in one 
   If you are missing a config/theme option feel free to open an issue.
 
 - **Error Display.**
-  File entries which could not be scanned, e.g. due to missing permissions to access a
-  subdirectory, are highlighted in the file tree. The total error count is
-  displayed in the header line.
+  File entries, which could not be scanned (e.g. due to missing permissions to
+  access a subdirectory), are highlighted in the file tree. The total error
+  count is displayed in the header line.
   Pressing `E` displays all errors. Pressing `e` on a file entry displays only
   the errors that occured while scanning this particular entry.
 
 ## Limitations
 
 - Unix-only as `std::os::unix::fs::MetadataExt` is used.
-- Files deleted outside of the `dumb` process are not detected.
+- Filesystem changes, which are not caused by `dumb` itself, are not detected.
 - The `freed` size of an entry is computed from its allocated blocks
   (`st_blocks`, like `du`) and can slightly differ from the space that deleting
   it actually frees:
