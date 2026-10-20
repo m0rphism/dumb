@@ -429,18 +429,24 @@ fn render_file_tree(
                     line.text(&s, &size_percent_str);
                 }
                 Column::ModTime => {
-                    let last_modified = DateTime::<Local>::from(e.inode.last_modified);
                     let s_val = &style_mod(&style.modtime_value);
                     let s_delim = &style_mod(&style.modtime_delim);
-                    line.text(s_val, &last_modified.format("%Y").to_string());
-                    line.text(s_delim, "-");
-                    line.text(s_val, &last_modified.format("%m").to_string());
-                    line.text(s_delim, "-");
-                    line.text(s_val, &last_modified.format("%d %H").to_string());
-                    line.text(s_delim, ":");
-                    line.text(s_val, &last_modified.format("%M").to_string());
-                    line.text(s_delim, ":");
-                    line.text(s_val, &last_modified.format("%S").to_string());
+                    match e.inode.last_modified {
+                        Some(last_modified) => {
+                            let last_modified = DateTime::<Local>::from(last_modified);
+                            line.text(s_val, &last_modified.format("%Y").to_string());
+                            line.text(s_delim, "-");
+                            line.text(s_val, &last_modified.format("%m").to_string());
+                            line.text(s_delim, "-");
+                            line.text(s_val, &last_modified.format("%d %H").to_string());
+                            line.text(s_delim, ":");
+                            line.text(s_val, &last_modified.format("%M").to_string());
+                            line.text(s_delim, ":");
+                            line.text(s_val, &last_modified.format("%S").to_string());
+                        }
+                        // The modtime could not be retrieved, so display a placeholder.
+                        None => line.text(s_val, "-"),
+                    }
                 }
             }
             x += width + COLUMN_GAP;

@@ -4,7 +4,6 @@ use std::{
     os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
     sync::Arc,
-    time::SystemTime,
 };
 
 use anyhow::{Context, Result};
@@ -180,7 +179,7 @@ impl FileTree {
             .with_context(|| format!("Failed to read metadata for path {path:?}."))?;
         let inode = Inode {
             allocated_bytes: meta.blocks() * 512,
-            last_modified: meta.modified().unwrap_or(SystemTime::UNIX_EPOCH),
+            last_modified: meta.modified().ok(),
             num_hardlinks: meta.nlink(),
             is_dir: meta.is_dir(),
         };

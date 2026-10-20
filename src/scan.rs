@@ -33,7 +33,9 @@ pub struct Inode {
     /// contents. For sparse files the size of the actually allocated blocks is used instead of
     /// their apparent size.
     pub allocated_bytes: u64,
-    pub last_modified: SystemTime,
+    /// The last modification time of the entry, or `None` if it could not be read
+    /// (e.g. on some network or FUSE mounts).
+    pub last_modified: Option<SystemTime>,
     pub num_hardlinks: u64,
     pub is_dir: bool,
 }
@@ -93,13 +95,13 @@ fn scan_(
     };
 
     let last_modified = match meta.modified() {
-        Ok(t) => t,
+        Ok(t) => Some(t),
         Err(e) => {
             on_event(ScanEvent::Error(
                 path.to_path_buf(),
-                format!("Cannot read modtime (using UNIX_EPOCH instead):\n{e}"),
+                format!("Cannot read modtime:\n{e}"),
             ))?;
-            SystemTime::UNIX_EPOCH
+            None
         }
     };
 
