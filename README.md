@@ -106,7 +106,7 @@ provided [`flake.nix`](flake.nix) file.
 To run `dumb` for testing:
 ```sh
 nix run github:m0rphism/dumb         # builds and runs the master branch
-nix run github:m0rphism/dumb/v0.1.0  # builds and runs a specific tag
+nix run github:m0rphism/dumb/v0.1.1  # builds and runs a specific tag
 ```
 
 To install it permanently:

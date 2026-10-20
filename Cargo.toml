@@ -1,6 +1,6 @@
 [package]
 name = "dumb"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "An interactive TUI version of the standard unix du program."
 license = "MIT"
