@@ -375,11 +375,18 @@ fn render_file_tree(
             }
             match col {
                 Column::Name => {
+                    // Directories display a trailing '/', so reserve one cell for it such that
+                    // the name never overflows the column into the column gap.
+                    let max_name_len = if e.is_dir {
+                        width.saturating_sub(1)
+                    } else {
+                        width
+                    };
                     let mut name = e
                         .name
                         .to_string_lossy()
                         .chars()
-                        .take(width as usize)
+                        .take(max_name_len as usize)
                         .collect::<String>();
                     if e.is_dir {
                         name += "/";
