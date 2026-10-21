@@ -103,7 +103,12 @@ fn run() -> Result<()> {
                     let mut file_tree = file_tree.lock().unwrap();
                     scan_event
                         .map_path_bufs(|p| *p = p.strip_prefix(&root_dir).unwrap().to_path_buf());
-                    file_tree.handle_scan_event(scan_event);
+                    file_tree.handle_scan_event(
+                        scan_event,
+                        &|p: &Path| {
+                            std::fs::symlink_metadata(root_dir.join(p)).ok().map(|m| m.nlink())
+                        },
+                    );
                     tree_version.fetch_add(1, Ordering::Relaxed);
                     Ok(())
                 },

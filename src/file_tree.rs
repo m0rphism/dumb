@@ -209,6 +209,9 @@ impl FileTree {
 
     /// Single entry point for scan events. The caller bumps the tree version after each event.
     ///
+    /// `stat_nlink` returns the current on-disk hardlink count for a root-dir-relative path,
+    /// or `None` if the path cannot be resolved.
+    ///
     /// - Events with paths under a deleted path are dropped.
     /// - `StartedScan` of a directory adds the disk usage of its own filesystem entry to both sizes
     ///   of itself and of every ancestor (counted once per inode).
@@ -217,7 +220,11 @@ impl FileTree {
     ///   the parent). Inodes with multiple paths are tracked in `linked` and contribute to their
     ///   lowest common ancestor directory once all its hardlinked paths have been scanned.
     /// - `FinishedScan` only changes the node state to finished (relevant for TUI).
-    pub fn handle_scan_event(&mut self, event: ScanEvent) {
+    pub fn handle_scan_event(
+        &mut self,
+        event: ScanEvent,
+        stat_nlink: &impl Fn(&Path) -> Option<u64>,
+    ) {
         match event {
             ScanEvent::StartedScan(path, inode_id, inode) => {
                 if self.is_deleted_path(&path) {
@@ -238,7 +245,18 @@ impl FileTree {
                     // path's ancestors.
                     self.root.add_along(&parent, inode.allocated_bytes, 0);
                     // For the freed metric, it depends on the amount of paths to the inode.
-                    if inode.num_hardlinks == 1 {
+                    let num_hardlinks = if inode.num_hardlinks == 1 {
+                        1
+                    } else {
+                        // Restat the path to prevent a race between scanning and the user deleting a file.
+                        // Concretely, this protects against the following thread interleaving:
+                        // - Scan Thread: Scan function records link count of a file
+                        // - Main Thread: User deletes either a different link to that file
+                        // - Scan Thread: handle_scan_event is called and uses the stale link count
+                        //   from the scan function
+                        stat_nlink(&path).unwrap_or(inode.num_hardlinks)
+                    };
+                    if num_hardlinks == 1 {
                         // A single-path inode contributes to its parent.
                         self.root.add_along(&parent, 0, inode.allocated_bytes);
                     } else {
@@ -249,7 +267,7 @@ impl FileTree {
                             contributes_at: None,
                         });
                         rec.paths.push(path.clone());
-                        if rec.paths.len() == inode.num_hardlinks as usize {
+                        if rec.paths.len() == num_hardlinks as usize {
                             let r = lca(&rec.paths);
                             self.root.add_along(&r, 0, inode.allocated_bytes);
                             rec.contributes_at = Some(r);
