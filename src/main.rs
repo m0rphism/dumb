@@ -196,11 +196,6 @@ fn run() -> Result<()> {
         [w, h]
     };
 
-    // cur_subdir_entries: root_dir
-    //     .read_dir()?
-    //     .filter_map(|e| e.ok().map(|e| e.file_name()))
-    //     .collect(),
-    // state.cur_subdir_entries.sort();
     let initial_status = config_warning.or_else(|| {
         if config.initial_statusbar_message.is_empty() {
             None
