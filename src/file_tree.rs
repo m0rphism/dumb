@@ -386,25 +386,37 @@ impl FileTree {
                     self.root.sub_along(r, 0, size);
                 }
                 self.linked.remove(&inode_id);
-            } else if let Some(c) = link_record.contributes_at.clone() {
-                let c_new = lca(&link_record.paths);
-                if c_new != c {
-                    // The contribution of the inode at `c` moves into the subdirectory `c_new`.
-                    // Consequently, the freed size of all nodes in between `c` and `c_new` needs to
-                    // be increased.
-                    self.root.add_along(&c_new, 0, size);
-                    self.root.sub_along(&c, 0, size);
-                    link_record.contributes_at = Some(c_new);
+            } else {
+                // Refresh the hardlink count of the surviving links so that their entries reflect
+                // the deletion.
+                for n in &link_record.paths {
+                    if let Some(count) = stat_nlink(n)
+                        && let Some(node) = self.root.get_mut(n)
+                    {
+                        node.inode.num_hardlinks = count;
+                    }
                 }
-            } else if let Some(name) = link_record.paths.first().cloned() {
-                // Incomplete record: check whether all of the inode's current links are scanned now
-                // and, if so, apply the contribution.
-                if let Some(n) = stat_nlink(&name)
-                    && n as usize == link_record.paths.len()
-                {
-                    let c = lca(&link_record.paths);
-                    self.root.add_along(&c, 0, size);
-                    link_record.contributes_at = Some(c);
+
+                if let Some(c) = link_record.contributes_at.clone() {
+                    let c_new = lca(&link_record.paths);
+                    if c_new != c {
+                        // The contribution of the inode at `c` moves into the subdirectory `c_new`.
+                        // Consequently, the freed size of all nodes in between `c` and `c_new` needs
+                        // to be increased.
+                        self.root.add_along(&c_new, 0, size);
+                        self.root.sub_along(&c, 0, size);
+                        link_record.contributes_at = Some(c_new);
+                    }
+                } else if let Some(name) = link_record.paths.first().cloned() {
+                    // Incomplete record: check whether all of the inode's current links are scanned
+                    // now and, if so, apply the contribution.
+                    if let Some(n) = stat_nlink(&name)
+                        && n as usize == link_record.paths.len()
+                    {
+                        let c = lca(&link_record.paths);
+                        self.root.add_along(&c, 0, size);
+                        link_record.contributes_at = Some(c);
+                    }
                 }
             }
         }
