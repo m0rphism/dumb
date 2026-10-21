@@ -21,7 +21,7 @@ Useful for exploring what eats up all that disk space and deleting files in one 
 ## Core Features
 
 - **Concurrency.**
-  Live file tree updates while the directory is being scanned recursively.
+  Live file tree updates while the directory is being scanned.
   This allows exploring subdirectories before the scan is completed.
 
 - **Proper Size Semantics.**
@@ -42,9 +42,9 @@ Useful for exploring what eats up all that disk space and deleting files in one 
 
 - **In-Process Deletion.**
   Pressing `d` deletes the currently selected entry (by default with confirmation).
-  Deletion is also possible while the deleted directory is still being scanned,
-  and the sizes of other directories are adjusted correctly even in the
-  presence of hardlinks.
+  Deletion also works while the directory is being scanned, and the sizes of
+  all other entries are adjusted correctly even in the presence of hardlinks.
+  Deletion across mount points is refused (linux-only).
 
 - **TOML config and themes.**
   Many behaviors can be customized and virtually everything can be themed.
@@ -62,6 +62,7 @@ Useful for exploring what eats up all that disk space and deleting files in one 
 ## Limitations
 
 - Unix-only as `std::os::unix::fs::MetadataExt` is used.
+- Deletion across mountpoints is only refused on linux.
 - Filesystem changes, which are not caused by `dumb` itself, are not detected.
 - The `freed` size of an entry is computed from its allocated blocks
   (`st_blocks`, like `du`) and can slightly differ from the space that deleting
@@ -136,7 +137,7 @@ To install it permanently:
 
 ## Contributing
 
-I am generally open for contributions, but ask that you adhere to a single rule:
+I am generally open for contributions, but ask that you adhere to the following rule:
 
 > **Issues and pull request must start with at least one human written paragraph,
 > and AI generated text and code must be clearly highlighted as such.**
