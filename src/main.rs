@@ -103,12 +103,11 @@ fn run() -> Result<()> {
                     let mut file_tree = file_tree.lock().unwrap();
                     scan_event
                         .map_path_bufs(|p| *p = p.strip_prefix(&root_dir).unwrap().to_path_buf());
-                    file_tree.handle_scan_event(
-                        scan_event,
-                        &|p: &Path| {
-                            std::fs::symlink_metadata(root_dir.join(p)).ok().map(|m| m.nlink())
-                        },
-                    );
+                    file_tree.handle_scan_event(scan_event, &|p: &Path| {
+                        std::fs::symlink_metadata(root_dir.join(p))
+                            .ok()
+                            .map(|m| m.nlink())
+                    });
                     tree_version.fetch_add(1, Ordering::Relaxed);
                     Ok(())
                 },
@@ -270,9 +269,7 @@ fn handle_key_event(
         // Any key press clears the status message.
         state.status = None;
 
-        if key_event.code == KeyCode::Char('c')
-            && key_event.modifiers == KeyModifiers::CONTROL
-        {
+        if key_event.code == KeyCode::Char('c') && key_event.modifiers == KeyModifiers::CONTROL {
             return None;
         }
 
@@ -520,9 +517,7 @@ fn handle_key_event(
     Some(redraw)
 }
 
-fn load_config_and_theme(
-    config_path: &Option<PathBuf>,
-) -> Result<(Config, Theme, Option<String>)> {
+fn load_config_and_theme(config_path: &Option<PathBuf>) -> Result<(Config, Theme, Option<String>)> {
     let (config_dir, config_path) = if let Some(config_path) = config_path {
         let config_path = config_path
             .canonicalize()
