@@ -5,6 +5,7 @@ pub mod frame;
 pub mod help;
 pub mod layout;
 pub mod motion;
+pub mod mount_point;
 pub mod raw_mode;
 pub mod render;
 pub mod scan;
@@ -39,6 +40,7 @@ use crate::{
     help::{HELP, HelpMeta},
     layout::Layout,
     motion::Motion,
+    mount_point::{Search, find_mount_point},
     raw_mode::RawMode,
     render::{fixed_columns_width, render_state},
     scan::scan,
@@ -859,6 +861,29 @@ impl State {
     /// deleted entry, and update the selection.
     pub fn try_delete(&mut self, rel: &Path, snapshot: &mut Snapshot) {
         let abs = self.root_dir.join(rel);
+
+        // Refuse deletions that would cross a mount point (e.g. a bind mount): recursively
+        // deleting them would delete files of the mounted file system, i.e. data outside
+        // of the scanned directory tree.
+        //
+        // Important: This check only works on linux and is ignored if `/proc/self/mounts` does not
+        // exist.
+        match find_mount_point(&abs) {
+            Ok(Search::NoMountPoint | Search::NoMountTable) => {}
+            Ok(Search::MountPoint(m)) => {
+                let found = if m == abs {
+                    "is a mount point".to_string()
+                } else {
+                    format!("contains the mount point {m:?}")
+                };
+                self.status = Some(format!("{abs:?}: {found}; unmount it first"));
+                return;
+            }
+            Err(e) => {
+                self.status = Some(format!("{abs:?}: cannot check for mount points: {e}"));
+                return;
+            }
+        }
 
         if let Err(e) = remove_file_or_dir(&abs) {
             self.status = Some(format!("Failed to delete {abs:?}: {e}"));
