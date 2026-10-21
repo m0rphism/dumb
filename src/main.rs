@@ -67,7 +67,8 @@ fn run() -> Result<()> {
     let (config, theme, config_warning) = load_config_and_theme(&args.config)?;
 
     let root_dir = match args.root_dir {
-        Some(path) => path,
+        Some(path) => std::fs::canonicalize(&path)
+            .with_context(|| format!("Failed to canonicalize the root path {path:?}."))?,
         None => {
             std::env::current_dir().context("Failed to determine the current working directory.")?
         }
