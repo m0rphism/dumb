@@ -13,7 +13,7 @@ pub mod theme;
 
 use std::{
     ffi::OsString,
-    io::stdout,
+    io::{IsTerminal, Write, stdout},
     os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
     process::ExitCode,
@@ -53,7 +53,7 @@ fn main() -> ExitCode {
         Err(e) => {
             let err_str = format!("{e:?}");
             let _ = std::fs::write("dumb.log", &err_str);
-            eprintln!("{err_str}");
+            let _ = writeln!(std::io::stderr(), "{err_str}");
             ExitCode::FAILURE
         }
     }
@@ -140,6 +140,33 @@ fn run() -> Result<()> {
         move || {
             while let Ok(e) = crossterm::event::read() {
                 if sender.send(Event::Term(e)).is_err() {
+                    break;
+                }
+            }
+            // The terminal is no longer available (e.g. the terminal window was closed).
+            let _ = sender.send(Event::InputClosed);
+        }
+    });
+
+    // Spawn a thread that monitors the availability of the terminal's input source. If the terminal
+    // disappears (e.g. the terminal window is closed), crossterm's event reader does not report it:
+    // on the default Unix event source (crossterm 0.29), the EOF/EIO returned by the dead tty is
+    // silently ignored and the reader spins forever without returning events or errors. The
+    // watchdog detects the dead input source and makes the main loop exit, so the program does not
+    // hang and the stuck input thread does not keep spinning at full CPU.
+    //
+    // This prevents `dumb` from spinning forever if it is backgrounded or started with `nohup` and
+    // then the terminal is closed.
+    let _watchdog_handle = std::thread::spawn({
+        let sender = sender.clone();
+        move || {
+            loop {
+                std::thread::sleep(Duration::from_millis(500));
+                // crossterm uses stdin if it is a terminal and `/dev/tty` otherwise
+                let terminal_input_is_alive =
+                    std::io::stdin().is_terminal() || std::fs::File::open("/dev/tty").is_ok();
+                if !terminal_input_is_alive {
+                    let _ = sender.send(Event::InputClosed);
                     break;
                 }
             }
@@ -248,6 +275,9 @@ fn run() -> Result<()> {
                 }
                 true
             }
+            // The terminal is gone (e.g. the window was closed): exit, since rendering to a dead
+            // terminal is pointless and no further user input can arrive.
+            Event::InputClosed => break,
         };
         if redraw {
             state.layout = render_state(&mut stdout, &state, &snapshot, &theme, &config)?;
@@ -579,6 +609,9 @@ pub enum Event {
     Redraw,
     /// Sent by the snapshot builder thread after building a snapshot.
     SnapshotReady(Snapshot),
+    /// Sent by the input thread if reading terminal events failed, i.e. the terminal is no longer
+    /// available (e.g. the terminal window was closed). The main loop exits on this event.
+    InputClosed,
 }
 
 #[derive(Debug, Clone)]
