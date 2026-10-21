@@ -41,7 +41,7 @@ use crate::{
     layout::Layout,
     motion::Motion,
     mount_point::{Search, find_mount_point},
-    raw_mode::RawMode,
+    raw_mode::{RawMode, error_log_to_file_enabled},
     render::{fixed_columns_width, render_state},
     scan::scan,
     snapshot::{FileEntry, Snapshot, ViewParams},
@@ -54,7 +54,9 @@ fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             let err_str = format!("{e:?}");
-            let _ = std::fs::write("dumb.log", &err_str);
+            if error_log_to_file_enabled() {
+                let _ = std::fs::write("dumb.log", &err_str);
+            }
             let _ = writeln!(std::io::stderr(), "{err_str}");
             ExitCode::FAILURE
         }
