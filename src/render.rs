@@ -152,10 +152,17 @@ fn render_header(
     // Path
     let prefix_str = display_path_prefix(&state.root_dir, config);
     let suffix_str = state.file_view.cur_subdir.to_string_lossy();
+    // The prefix may already end in '/', e.g. '/' for the filesystem root, so do not
+    // introduce a second leading '/' when joining the prefix and the suffix.
     let path_str = if suffix_str.is_empty() {
-        format!("{prefix_str}/")
+        if prefix_str.ends_with('/') {
+            prefix_str.clone()
+        } else {
+            format!("{prefix_str}/")
+        }
     } else {
-        format!("{prefix_str}/{suffix_str}/")
+        let prefix = prefix_str.strip_suffix('/').unwrap_or(prefix_str.as_str());
+        format!("{prefix}/{suffix_str}/")
     };
 
     let path_label = "Path: ";
