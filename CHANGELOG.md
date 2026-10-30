@@ -4,7 +4,7 @@
 
 ### Fixes
 
-- When `dumb` is started in the file system root, i.e. `dumb /`, then the current directly display in the header was rendered incorrectly with two slashes at the beginning, e.g. `//home/` instead of `/home/`. This is now fixed.
+- When `dumb` is started in the file system root, i.e. `dumb /`, then the current directory display in the header was rendered incorrectly with two slashes at the beginning, e.g. `//home/` instead of `/home/`. This is now fixed.
 
 ## 0.2.0
 
